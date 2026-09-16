@@ -6,7 +6,7 @@ import { createAuditLog } from '../audit';
 export function calculateJobMatchScore(jobRequirements: string, candidateSkills?: string | null): number {
   if (!candidateSkills) return 65; // baseline
   try {
-    const skillsList = JSON.parse(candidateSkills);
+    const skillsList = typeof candidateSkills === 'string' ? JSON.parse(candidateSkills) : candidateSkills;
     if (!Array.isArray(skillsList) || skillsList.length === 0) return 65;
 
     const lowerReq = jobRequirements.toLowerCase();
@@ -25,6 +25,75 @@ export function calculateJobMatchScore(jobRequirements: string, candidateSkills?
 
 export function calculateCandidateMatchScore(skills: string[], requirements: string): number {
   return calculateJobMatchScore(requirements, JSON.stringify(skills));
+}
+
+// Duplicate candidate detection across email or phone
+export async function checkDuplicateCandidate(params: {
+  tenantId: string;
+  email: string;
+  phone?: string;
+}): Promise<{ isDuplicate: boolean; existingCandidate?: any }> {
+  const existing = await prisma.candidate.findFirst({
+    where: {
+      tenantId: params.tenantId,
+      OR: [
+        { email: params.email.toLowerCase().trim() },
+        ...(params.phone ? [{ phone: params.phone.trim() }] : []),
+      ],
+    },
+    include: { jobRequisition: true },
+  });
+
+  return {
+    isDuplicate: Boolean(existing),
+    existingCandidate: existing || undefined,
+  };
+}
+
+// AI Interview Question Generation based on job requisition and candidate profile
+export function generateInterviewQuestions(params: {
+  jobTitle: string;
+  requirements: string;
+  skills: string[];
+  experienceYears?: number;
+}): string[] {
+  const skillsStr = params.skills.join(', ');
+  return [
+    `Can you describe your end-to-end architectural experience with ${params.skills[0] || 'core technologies'} in high-scale environments?`,
+    `How do you handle distributed state, data validation, and idempotency when building mission-critical services?`,
+    `Given our requirements in ${params.jobTitle} (${params.requirements.substring(0, 80)}...), how would you optimize database queries and latency?`,
+    `Describe a complex production incident you resolved involving ${skillsStr}, and how you prevented recurrence.`,
+    `How do you balance technical debt versus fast delivery when collaborating across cross-functional product and design teams?`,
+  ];
+}
+
+// AI Interview Feedback Summarization across multiple rounds
+export function summarizeInterviewFeedback(interviews: Array<{ roundName: string; rating?: number | null; feedback?: string | null }>): {
+  averageRating: number;
+  summary: string;
+  recommendation: 'STRONG_HIRE' | 'HIRE' | 'LEAN_HIRE' | 'NO_HIRE';
+} {
+  if (!interviews || interviews.length === 0) {
+    return { averageRating: 0, summary: 'No interviews conducted yet', recommendation: 'NO_HIRE' };
+  }
+
+  const validRatings = interviews.map((i) => i.rating || 3);
+  const avg = validRatings.reduce((a, b) => a + b, 0) / validRatings.length;
+  const feedbackPoints = interviews
+    .map((i) => `• ${i.roundName} (Rating: ${i.rating || 'N/A'}/5): ${i.feedback || 'Positive assessment'}`)
+    .join('\n');
+
+  let recommendation: 'STRONG_HIRE' | 'HIRE' | 'LEAN_HIRE' | 'NO_HIRE' = 'HIRE';
+  if (avg >= 4.5) recommendation = 'STRONG_HIRE';
+  else if (avg >= 3.5) recommendation = 'HIRE';
+  else if (avg >= 2.5) recommendation = 'LEAN_HIRE';
+  else recommendation = 'NO_HIRE';
+
+  return {
+    averageRating: Math.round(avg * 10) / 10,
+    summary: `Candidate completed ${interviews.length} evaluation round(s):\n${feedbackPoints}`,
+    recommendation,
+  };
 }
 
 export async function createJobRequisition(params: {
@@ -115,6 +184,143 @@ export async function applyCandidate(params: {
   });
 
   return candidate;
+}
+
+export async function scheduleInterview(params: {
+  tenantId: string;
+  candidateId: string;
+  roundName: string;
+  scheduledAt: Date;
+  interviewerId?: string;
+  actor: AuthUser;
+}) {
+  const interview = await prisma.interview.create({
+    data: {
+      candidateId: params.candidateId,
+      roundName: params.roundName,
+      scheduledAt: params.scheduledAt,
+      interviewerId: params.interviewerId,
+      status: 'SCHEDULED',
+    },
+  });
+
+  await prisma.candidate.update({
+    where: { id: params.candidateId },
+    data: { stage: 'INTERVIEW' },
+  });
+
+  await createAuditLog({
+    tenantId: params.tenantId,
+    actorId: params.actor.userId,
+    actorRole: params.actor.roles[0],
+    action: 'SCHEDULE_INTERVIEW',
+    entityType: 'ATS_INTERVIEW',
+    entityId: interview.id,
+    afterState: { candidateId: params.candidateId, roundName: params.roundName, scheduledAt: params.scheduledAt },
+  });
+
+  return interview;
+}
+
+export async function submitInterviewFeedback(params: {
+  tenantId: string;
+  interviewId: string;
+  rating: number; // 1 to 5
+  feedback: string;
+  actor: AuthUser;
+}) {
+  const interview = await prisma.interview.update({
+    where: { id: params.interviewId },
+    data: {
+      rating: params.rating,
+      feedback: params.feedback,
+      status: 'COMPLETED',
+    },
+  });
+
+  await createAuditLog({
+    tenantId: params.tenantId,
+    actorId: params.actor.userId,
+    actorRole: params.actor.roles[0],
+    action: 'SUBMIT_INTERVIEW_FEEDBACK',
+    entityType: 'ATS_INTERVIEW',
+    entityId: interview.id,
+    afterState: { rating: params.rating, feedback: params.feedback },
+  });
+
+  return interview;
+}
+
+export async function createCandidateOffer(params: {
+  tenantId: string;
+  candidateId: string;
+  offeredCtc: number;
+  joiningDate: Date;
+  designation: string;
+  actor: AuthUser;
+}) {
+  const offer = await prisma.candidateOffer.upsert({
+    where: { candidateId: params.candidateId },
+    update: {
+      offeredCtc: params.offeredCtc,
+      joiningDate: params.joiningDate,
+      designation: params.designation,
+      status: 'ISSUED',
+    },
+    create: {
+      candidateId: params.candidateId,
+      offeredCtc: params.offeredCtc,
+      joiningDate: params.joiningDate,
+      designation: params.designation,
+      status: 'ISSUED',
+    },
+  });
+
+  await prisma.candidate.update({
+    where: { id: params.candidateId },
+    data: { stage: 'OFFERED' },
+  });
+
+  await createAuditLog({
+    tenantId: params.tenantId,
+    actorId: params.actor.userId,
+    actorRole: params.actor.roles[0],
+    action: 'ISSUE_CANDIDATE_OFFER',
+    entityType: 'ATS_OFFER',
+    entityId: offer.id,
+    afterState: { candidateId: params.candidateId, offeredCtc: params.offeredCtc, designation: params.designation },
+  });
+
+  return offer;
+}
+
+export async function respondToCandidateOffer(params: {
+  tenantId: string;
+  candidateId: string;
+  decision: 'ACCEPTED' | 'DECLINED';
+  actor?: AuthUser;
+}) {
+  const offer = await prisma.candidateOffer.update({
+    where: { candidateId: params.candidateId },
+    data: {
+      status: params.decision,
+      acceptedAt: params.decision === 'ACCEPTED' ? new Date() : undefined,
+    },
+  });
+
+  if (params.decision === 'ACCEPTED') {
+    await prisma.candidate.update({
+      where: { id: params.candidateId },
+      data: { stage: 'OFFERED' },
+    });
+  } else {
+    await prisma.candidate.update({
+      where: { id: params.candidateId },
+      data: { stage: 'REJECTED', rejectionReason: 'Candidate declined offer' },
+    });
+  }
+
+  return offer;
 }
 
 export async function convertCandidateToEmployee(params: {

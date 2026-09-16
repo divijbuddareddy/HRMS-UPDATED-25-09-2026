@@ -5,7 +5,39 @@ import { createAuditLog } from '../audit';
 export function calculateWeightedPerformanceScore(
   goals: Array<{ weight: number; progressPercent: number }>
 ): number {
+  if (!goals || goals.length === 0) return 0;
   return goals.reduce((acc, g) => acc + g.weight * (g.progressPercent / 100), 0);
+}
+
+export interface CalibrationGroupScore {
+  employeeId: string;
+  rawManagerRating: number;
+  calibratedRating: number;
+  percentileRank: number;
+}
+
+// Calculate normal distribution calibration across department/team appraisals
+export function calibrateRatingsDistribution(
+  appraisals: Array<{ employeeId: string; managerRating: number }>
+): CalibrationGroupScore[] {
+  if (appraisals.length === 0) return [];
+  const sorted = [...appraisals].sort((a, b) => b.managerRating - a.managerRating);
+  const total = sorted.length;
+
+  return sorted.map((app, index) => {
+    const percentile = Math.round(((total - index) / total) * 100);
+    // Bell curve target: Top 20% = 4.5-5.0, Mid 70% = 3.0-4.4, Bottom 10% = 1.0-2.9
+    let calibrated = app.managerRating;
+    if (percentile > 80) calibrated = Math.min(5.0, Math.max(4.5, app.managerRating));
+    else if (percentile < 15) calibrated = Math.min(2.9, app.managerRating);
+
+    return {
+      employeeId: app.employeeId,
+      rawManagerRating: app.managerRating,
+      calibratedRating: Math.round(calibrated * 10) / 10,
+      percentileRank: percentile,
+    };
+  });
 }
 
 export async function createPerformanceCycle(params: {
@@ -144,4 +176,47 @@ export async function submitManagerAppraisal(params: {
   });
 
   return appraisal;
+}
+
+export interface PerformanceImprovementPlan {
+  employeeId: string;
+  reason: string;
+  durationDays: number;
+  actionPlan: string;
+  status: 'ACTIVE' | 'RESOLVED' | 'UNSUCCESSFUL';
+  startDate: Date;
+  reviewDate: Date;
+}
+
+export async function initiatePIP(params: {
+  tenantId: string;
+  employeeId: string;
+  reason: string;
+  durationDays?: number;
+  actionPlan: string;
+  actor: AuthUser;
+}): Promise<PerformanceImprovementPlan> {
+  const duration = params.durationDays || 60;
+  const startDate = new Date();
+  const reviewDate = new Date(Date.now() + duration * 24 * 60 * 60 * 1000);
+
+  await createAuditLog({
+    tenantId: params.tenantId,
+    actorId: params.actor.userId,
+    actorRole: params.actor.roles[0] || 'HR_ADMIN',
+    action: 'INITIATE_PERFORMANCE_IMPROVEMENT_PLAN',
+    entityType: 'PERFORMANCE_PIP',
+    entityId: params.employeeId,
+    afterState: { employeeId: params.employeeId, reason: params.reason, durationDays: duration, reviewDate },
+  });
+
+  return {
+    employeeId: params.employeeId,
+    reason: params.reason,
+    durationDays: duration,
+    actionPlan: params.actionPlan,
+    status: 'ACTIVE',
+    startDate,
+    reviewDate,
+  };
 }

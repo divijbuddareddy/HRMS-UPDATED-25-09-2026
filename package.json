@@ -5,13 +5,18 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
+    "render:build": "prisma generate && prisma db push --accept-data-loss && tsx scripts/seed.ts && next build",
+    "postinstall": "prisma generate",
     "start": "next start",
     "lint": "next lint",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:seed": "tsx scripts/seed.ts",
     "test": "vitest run",
-    "test:gate": "tsx scripts/run-acceptance-gate.ts"
+    "test:gate": "tsx scripts/run-acceptance-gate.ts",
+    "db:backup": "tsx scripts/backup-restore.ts backup",
+    "db:restore:test": "tsx scripts/backup-restore.ts verify",
+    "audit:production": "tsx scripts/run-production-audit.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

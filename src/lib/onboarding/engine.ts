@@ -128,7 +128,7 @@ export async function updateOnboardingItemStatus(params: {
     },
   });
 
-  // If completed, update employee status to ACTIVE / CONFIRMED
+  // If completed, update employee status to ACTIVE
   if (isAllComplete) {
     await prisma.employee.update({
       where: { id: item.instance.employeeId },
@@ -147,4 +147,45 @@ export async function updateOnboardingItemStatus(params: {
   });
 
   return { item: updatedItem, instance: updatedInstance };
+}
+
+export async function verifyEmployeeOnboarding(params: {
+  tenantId: string;
+  instanceId: string;
+  actor: AuthUser;
+  notes?: string;
+}) {
+  const instance = await prisma.onboardingInstance.findUnique({
+    where: { id: params.instanceId },
+    include: { items: true },
+  });
+
+  if (!instance) throw new Error('Onboarding instance not found');
+
+  const updated = await prisma.onboardingInstance.update({
+    where: { id: instance.id },
+    data: {
+      status: 'VERIFIED',
+    },
+  });
+
+  await prisma.employee.update({
+    where: { id: instance.employeeId },
+    data: {
+      status: 'CONFIRMED',
+      confirmationDate: new Date(),
+    },
+  });
+
+  await createAuditLog({
+    tenantId: params.tenantId,
+    actorId: params.actor.userId,
+    actorRole: params.actor.roles[0] || 'HR_ADMIN',
+    action: 'HR_VERIFY_ONBOARDING',
+    entityType: 'ONBOARDING',
+    entityId: instance.id,
+    afterState: { status: 'VERIFIED', employeeId: instance.employeeId, confirmationDate: new Date().toISOString() },
+  });
+
+  return updated;
 }

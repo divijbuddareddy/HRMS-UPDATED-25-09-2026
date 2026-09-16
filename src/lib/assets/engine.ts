@@ -119,3 +119,15 @@ export async function returnAssetFromEmployee(params: {
 
   return result;
 }
+
+// Unreturned assets reporting & exit-clearance integration
+export async function getUnreturnedAssetsForEmployee(tenantId: string, employeeId: string) {
+  return prisma.assetAssignment.findMany({
+    where: {
+      employeeId,
+      returnedDate: null,
+      asset: { tenantId },
+    },
+    include: { asset: true },
+  });
+}

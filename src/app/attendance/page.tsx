@@ -197,10 +197,28 @@ export default function AttendancePage() {
     fetchAttendance();
   }, [month, year, selectedEmployeeId]);
 
-  // Handle standard Web Punch
+  // Handle standard Web Punch with live GPS detection & fallback
   const handlePunch = async (punchType: 'CHECK_IN' | 'CHECK_OUT') => {
     setPunching(true);
     setPunchMsg(null);
+
+    let lat = 12.9716;
+    let lng = 77.5946;
+    let acc = 10;
+
+    if (typeof window !== 'undefined' && 'geolocation' in navigator) {
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4000, enableHighAccuracy: true });
+        });
+        lat = pos.coords.latitude;
+        lng = pos.coords.longitude;
+        acc = pos.coords.accuracy || 10;
+      } catch (geoErr) {
+        // Fallback to headquarters coordinates if permission denied or timeout
+      }
+    }
+
     try {
       const res = await fetch('/api/attendance/punch', {
         method: 'POST',
@@ -208,9 +226,9 @@ export default function AttendancePage() {
         body: JSON.stringify({
           punchType,
           deviceType: 'WEB',
-          latitude: 12.9716, // Bengaluru HQ
-          longitude: 77.5946,
-          accuracy: 10,
+          latitude: lat,
+          longitude: lng,
+          accuracy: acc,
         }),
       });
       const data = await res.json();

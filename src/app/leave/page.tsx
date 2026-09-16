@@ -35,6 +35,8 @@ export default function LeavePage() {
   const [isHalfDay, setIsHalfDay] = useState(false);
   const [halfDaySession, setHalfDaySession] = useState<'FIRST_HALF' | 'SECOND_HALF'>('FIRST_HALF');
   const [reason, setReason] = useState('');
+  const [backupApproverId, setBackupApproverId] = useState('');
+  const [allEmployees, setAllEmployees] = useState<any[]>([]);
   const [applying, setApplying] = useState(false);
 
   const fetchLeaveData = async () => {
@@ -60,6 +62,13 @@ export default function LeavePage() {
         // Ledger logs
         const lRes = await fetch(`/api/leave/ledger?employeeId=${user.employee.id}`);
         if (lRes.ok) setLedgerLogs((await lRes.json()).transactions || []);
+
+        // Fetch employee list for optional backup approver
+        const empRes = await fetch('/api/employees');
+        if (empRes.ok) {
+          const empData = await empRes.json();
+          setAllEmployees((empData.employees || []).filter((e: any) => e.id !== user?.employee?.id));
+        }
       }
 
       // Team requests if manager / admin
@@ -92,6 +101,7 @@ export default function LeavePage() {
           endDate,
           isHalfDay,
           halfDaySession: isHalfDay ? halfDaySession : undefined,
+          backupApproverId: backupApproverId || undefined,
           reason,
         }),
       });
@@ -100,6 +110,7 @@ export default function LeavePage() {
       if (res.ok) {
         setIsApplyOpen(false);
         setReason('');
+        setBackupApproverId('');
         await fetchLeaveData();
       } else {
         alert(data.error || 'Failed to submit leave');
@@ -469,6 +480,22 @@ export default function LeavePage() {
                     <span>Sandwich Rule applies to this leave type (weekends in between are debited).</span>
                   </div>
                 )}
+
+                <div>
+                  <label className="font-medium text-slate-700 block mb-1">Backup Approver (Optional Fallback)</label>
+                  <select
+                    value={backupApproverId}
+                    onChange={(e) => setBackupApproverId(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-700"
+                  >
+                    <option value="">Default (Direct Reporting Manager)</option>
+                    {allEmployees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.displayName} ({emp.employeeCode} - {emp.department?.name || 'Team'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
                 <div>
                   <label className="font-medium text-slate-700 block mb-1">Reason *</label>

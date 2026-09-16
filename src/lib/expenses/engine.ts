@@ -2,6 +2,27 @@ import { prisma } from '../prisma';
 import { AuthUser } from '../types';
 import { createAuditLog } from '../audit';
 
+export interface MileageClaimCalculation {
+  distanceKm: number;
+  ratePerKm: number;
+  tollParkingAmount?: number;
+  totalCalculatedAmount: number;
+}
+
+export function calculateMileageExpense(
+  distanceKm: number,
+  ratePerKm = 10,
+  tollParkingAmount = 0
+): MileageClaimCalculation {
+  const base = Math.round(distanceKm * ratePerKm);
+  return {
+    distanceKm,
+    ratePerKm,
+    tollParkingAmount,
+    totalCalculatedAmount: base + tollParkingAmount,
+  };
+}
+
 export async function submitExpenseClaim(params: {
   tenantId: string;
   employeeId: string;

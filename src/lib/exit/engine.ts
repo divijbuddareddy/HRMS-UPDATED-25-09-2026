@@ -3,6 +3,7 @@ import { AuthUser } from '../types';
 import { createAuditLog } from '../audit';
 import { differenceInDays, getDaysInMonth, getDate } from 'date-fns';
 import { calculateEmployeeLeaveBalance } from '../leave/engine';
+import { generateEmployeeDocument } from '../documents/engine';
 
 export function calculateGratuity(monthlyBasic: number, tenureYears: number): number {
   if (tenureYears < 5) return 0;
@@ -74,6 +75,36 @@ export async function submitExitRequest(params: {
   });
 
   return exitReq;
+}
+
+export async function updateDepartmentClearance(params: {
+  tenantId: string;
+  exitRequestId: string;
+  department: 'IT' | 'ADMIN' | 'FINANCE';
+  status: 'PENDING' | 'CLEARED';
+  actor: AuthUser;
+}) {
+  const dataToUpdate: any = {};
+  if (params.department === 'IT') dataToUpdate.itClearanceStatus = params.status;
+  if (params.department === 'ADMIN') dataToUpdate.adminClearanceStatus = params.status;
+  if (params.department === 'FINANCE') dataToUpdate.financeClearanceStatus = params.status;
+
+  const updated = await prisma.exitRequest.update({
+    where: { id: params.exitRequestId },
+    data: dataToUpdate,
+  });
+
+  await createAuditLog({
+    tenantId: params.tenantId,
+    actorId: params.actor.userId,
+    actorRole: params.actor.roles[0] || 'ADMIN',
+    action: `EXIT_CLEARANCE_${params.department}_${params.status}`,
+    entityType: 'EXIT_CLEARANCE',
+    entityId: params.exitRequestId,
+    afterState: { department: params.department, status: params.status },
+  });
+
+  return updated;
 }
 
 export async function calculateFullAndFinalSettlement(params: {
@@ -189,7 +220,7 @@ export async function approveAndSettleExit(params: {
 }) {
   const exitReq = await prisma.exitRequest.findUnique({
     where: { id: params.exitRequestId },
-    include: { settlement: true },
+    include: { settlement: true, employee: true },
   });
 
   if (!exitReq) throw new Error('Exit request not found');
@@ -214,14 +245,37 @@ export async function approveAndSettleExit(params: {
       },
     });
 
-    // 3. Mark Employee status as EXITED
+    // 3. Mark Employee status as EXITED and lock user login
     await tx.employee.update({
       where: { id: exitReq.employeeId },
       data: { status: 'EXITED' },
     });
 
+    if (exitReq.employee.userId) {
+      await tx.user.update({
+        where: { id: exitReq.employee.userId },
+        data: { status: 'DEACTIVATED' },
+      });
+    }
+
     return updatedExit;
   });
+
+  // Generate Relieving & Experience Letter
+  try {
+    await generateEmployeeDocument({
+      tenantId: params.tenantId,
+      employeeId: exitReq.employeeId,
+      templateCode: 'RELIEVING_LETTER',
+      actor: params.actor,
+      customData: {
+        'lastWorkingDay': new Date(exitReq.approvedLwd).toLocaleDateString(),
+        'settlementAmount': exitReq.settlement?.finalSettlementAmount || 0,
+      },
+    });
+  } catch (err) {
+    console.error('Could not auto-generate relieving letter:', err);
+  }
 
   await createAuditLog({
     tenantId: params.tenantId,
@@ -230,7 +284,7 @@ export async function approveAndSettleExit(params: {
     action: 'SETTLE_AND_EXIT_EMPLOYEE',
     entityType: 'EXIT',
     entityId: exitReq.id,
-    afterState: { employeeId: exitReq.employeeId, status: 'EXITED' },
+    afterState: { employeeId: exitReq.employeeId, status: 'EXITED', userDeactivated: Boolean(exitReq.employee.userId) },
   });
 
   return result;

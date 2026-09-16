@@ -30,6 +30,22 @@
     @apply bg-slate-50 text-slate-900 antialiased selection:bg-emerald-500 selection:text-white;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
+
+  /* Ultra-responsive touch and click feedback */
+  button:not(:disabled),
+  a:not([aria-disabled="true"]),
+  [role="button"] {
+    transition: transform 0.08s ease, filter 0.08s ease, background-color 0.12s ease;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:not(:disabled):active,
+  a:not([aria-disabled="true"]):active,
+  [role="button"]:active {
+    transform: scale(0.97);
+    filter: brightness(0.95);
+  }
 }
 
 /* Custom modern scrollbar */

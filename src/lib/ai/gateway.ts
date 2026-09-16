@@ -1,8 +1,11 @@
+import crypto from 'crypto';
 import { prisma } from '../prisma';
 import { AuthUser } from '../types';
 import { hasPermission, PERMISSIONS } from '../rbac';
-import { calculateEmployeeLeaveBalance, getEmployeeAllLeaveBalances } from '../leave/engine';
-import { format } from 'date-fns';
+import { getEmployeeAllLeaveBalances, validateAndApplyLeave } from '../leave/engine';
+import { createAuditLog } from '../audit';
+import { generateInterviewQuestions, summarizeInterviewFeedback, calculateCandidateMatchScore } from '../ats/engine';
+import { SAAS_PLANS } from '../saas/plans';
 
 export interface AiQueryRequest {
   tenantId: string;
@@ -17,6 +20,73 @@ export interface AiQueryResponse {
     href: string;
   };
   contextData?: any;
+  requiresConfirmation?: boolean;
+  confirmationToken?: string;
+  mutationPreview?: Record<string, any>;
+}
+
+// In-memory pending AI confirmation store
+const pendingAiConfirmations = new Map<string, {
+  tenantId: string;
+  actor: AuthUser;
+  actionType: string;
+  params: any;
+  expiresAt: number;
+}>();
+
+export function generateAiConfirmationToken(
+  tenantId: string,
+  actor: AuthUser,
+  actionType: string,
+  params: any
+): string {
+  const token = `aicnf_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+  pendingAiConfirmations.set(token, {
+    tenantId,
+    actor,
+    actionType,
+    params,
+    expiresAt: Date.now() + 10 * 60 * 1000, // 10 mins
+  });
+  return token;
+}
+
+export async function executeAiConfirmedMutation(confirmationToken: string, actor: AuthUser) {
+  const record = pendingAiConfirmations.get(confirmationToken);
+  if (!record) {
+    throw new Error('Invalid or expired AI confirmation token');
+  }
+
+  if (Date.now() > record.expiresAt) {
+    pendingAiConfirmations.delete(confirmationToken);
+    throw new Error('AI confirmation token has expired');
+  }
+
+  // Ensure caller is the same actor who initiated query
+  if (record.actor.userId !== actor.userId) {
+    throw new Error('Unauthorized: You cannot confirm an AI mutation initiated by another user');
+  }
+
+  pendingAiConfirmations.delete(confirmationToken);
+
+  let result: any;
+  if (record.actionType === 'APPLY_LEAVE') {
+    result = await validateAndApplyLeave(record.params);
+  } else {
+    throw new Error(`Unsupported AI mutation action: ${record.actionType}`);
+  }
+
+  await createAuditLog({
+    tenantId: record.tenantId,
+    actorId: actor.userId,
+    actorRole: actor.roles[0] || 'EMPLOYEE',
+    action: `AI_MUTATION_CONFIRMED_${record.actionType}`,
+    entityType: 'AI_CONFIRMED_ACTION',
+    entityId: result?.id,
+    afterState: { actionType: record.actionType, params: record.params, resultId: result?.id },
+  });
+
+  return { success: true, result, message: 'Action executed safely following human confirmation' };
 }
 
 export async function processAIAssistantQuery(params: {
@@ -34,24 +104,55 @@ export async function processAIAssistantQuery(params: {
     permissions: [],
   };
 
-  if (params.role === 'EMPLOYEE' && params.query.toLowerCase().includes('company payroll cost')) {
+  // Check tenant AI toggle / status
+  const tenant = await prisma.tenant.findUnique({ where: { id: params.tenantId } });
+  if (tenant && tenant.settings) {
+    try {
+      const parsed = JSON.parse(tenant.settings);
+      if (parsed.aiEnabled === false) {
+        return { response: 'AI Copilot is currently disabled by your organization administrator.' };
+      }
+    } catch {
+      // default enabled
+    }
+  }
+
+  const qLower = params.query.toLowerCase();
+
+  // 1. Sensitive Data Restrictions & RBAC
+  if (params.role === 'EMPLOYEE' && (qLower.includes('company payroll cost') || qLower.includes('salary of') || qLower.includes('bank account of'))) {
     return {
       response:
         'Access Restricted: You do not have permission to view tenant-wide payroll financials or other employees sensitive bank details.',
     };
   }
 
-  if (params.query.toLowerCase().includes('sandwich')) {
+  // 2. Policy Q&A: Sandwich Rule
+  if (qLower.includes('sandwich')) {
     return {
       response:
         'The Sandwich Rule treats intervening weekends or public holidays as continuous leave if an employee is on unapproved absence on adjacent days.',
     };
   }
 
-  if (params.query.toLowerCase().includes('tax regime')) {
+  // 3. Policy Q&A: Tax Regime FY 2024-25 / 2026-27
+  if (qLower.includes('tax regime') || qLower.includes('new vs old')) {
     return {
       response:
         'Under the New Tax Regime FY 2024-25, basic exemption is up to ₹3 Lakhs with standard deduction of ₹75,000 for salaried employees and rebate under Sec 87A up to ₹7 Lakhs taxable income.',
+    };
+  }
+
+  // 4. Recruitment AI: Interview Questions Generation
+  if (qLower.includes('generate interview questions') || qLower.includes('interview questions for')) {
+    const questions = generateInterviewQuestions({
+      jobTitle: 'Senior Full Stack Engineer',
+      requirements: 'TypeScript, Next.js, Node.js, Distributed Systems, SQL',
+      skills: ['TypeScript', 'Next.js', 'PostgreSQL', 'Docker'],
+    });
+    return {
+      response: `Here are 5 tailored interview questions for the role:\n\n1. ${questions[0]}\n2. ${questions[1]}\n3. ${questions[2]}\n4. ${questions[3]}\n5. ${questions[4]}`,
+      dataPoints: questions,
     };
   }
 
@@ -62,6 +163,16 @@ export async function processAIAssistantQuery(params: {
 export async function processAiCopilotQuery(req: AiQueryRequest): Promise<AiQueryResponse> {
   const { tenantId, query, actor } = req;
   const q = query.toLowerCase();
+
+  // Log AI query request
+  await createAuditLog({
+    tenantId,
+    actorId: actor.userId,
+    actorRole: actor.roles[0] || 'EMPLOYEE',
+    action: 'AI_QUERY_EXECUTION',
+    entityType: 'AI_COPILOT',
+    afterState: { queryText: query.substring(0, 100) },
+  });
 
   // 1. Employee Self-Service: Leave Balance
   if (q.includes('leave') && (q.includes('balance') || q.includes('how many') || q.includes('remaining'))) {
@@ -97,7 +208,6 @@ export async function processAiCopilotQuery(req: AiQueryRequest): Promise<AiQuer
     }
 
     const deductions = JSON.parse(payslip.payrollItem.deductionsBreakdown || '{}');
-    const earnings = JSON.parse(payslip.payrollItem.earningsBreakdown || '{}');
 
     return {
       answer: `Your latest payslip is for **${payslip.month}/${payslip.year}** (Payslip #${payslip.payslipNumber}):\n\n• Gross Earnings: ₹${payslip.grossEarnings.toLocaleString('en-IN')}\n• Total Deductions: ₹${payslip.totalDeductions.toLocaleString('en-IN')} (PF: ₹${deductions['PF_EE'] || 0}, PT: ₹${deductions['PT'] || 0}, TDS: ₹${deductions['TDS'] || 0})\n• **Net Take-Home Salary**: **₹${payslip.netSalary.toLocaleString('en-IN')}**`,

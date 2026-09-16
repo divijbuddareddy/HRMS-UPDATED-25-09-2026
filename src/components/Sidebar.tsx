@@ -1,8 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import {
   LayoutDashboard,
@@ -21,11 +21,15 @@ import {
   Laptop,
   LogOut,
   Crown,
+  Layers,
+  Key,
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
   const pathname = usePathname();
+  const router = useRouter();
   const { user } = useAuth();
+  const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
 
   const isCompanyAdmin = user?.roles.includes('COMPANY_ADMIN') || user?.roles.includes('PLATFORM_SUPER_ADMIN');
   const isHR = isCompanyAdmin || user?.roles.includes('HR_ADMIN') || user?.roles.includes('HR_EXECUTIVE');
@@ -42,6 +46,7 @@ export const Sidebar: React.FC = () => {
 
   const lifecycleNav = [
     { label: 'Recruitment (ATS)', href: '/recruitment', icon: UserPlus2 },
+    { label: 'Careers Portal', href: '/careers', icon: Sparkles },
     { label: 'Onboarding', href: '/onboarding', icon: CheckSquare },
     { label: 'Documents & E-Sign', href: '/documents', icon: FileSignature },
     { label: 'Performance & OKRs', href: '/performance', icon: Target },
@@ -51,13 +56,72 @@ export const Sidebar: React.FC = () => {
   ];
 
   const platformNav = [
+    { label: 'Reports & Analytics', href: '/reports', icon: Layers },
     ...(isHR || isFinance || isCompanyAdmin
       ? [{ label: 'Audit Trail', href: '/audit', icon: History }]
       : []),
     ...(isCompanyAdmin
-      ? [{ label: 'Super Admin', href: '/super-admin', icon: Crown }]
+      ? [
+          { label: 'AI Configuration', href: '/settings/ai', icon: Key },
+          { label: 'Super Admin', href: '/super-admin', icon: Crown },
+        ]
       : []),
   ];
+
+  // Proactively prefetch all routes into Next.js cache on mount
+  useEffect(() => {
+    const allRoutes = [...coreNav, ...lifecycleNav, ...platformNav];
+    allRoutes.forEach((item) => {
+      try {
+        router.prefetch(item.href);
+      } catch {
+        // ignore
+      }
+    });
+  }, [router, isCompanyAdmin, isHR, isFinance]);
+
+  // Reset navigating state when pathname changes
+  useEffect(() => {
+    setNavigatingTo(null);
+  }, [pathname]);
+
+  const renderNavItem = (item: { label: string; href: string; icon: any }) => {
+    // If user just clicked an item, instantly move active highlight to it
+    const isSelected = navigatingTo ? navigatingTo === item.href : pathname === item.href;
+    const isPending = navigatingTo === item.href && pathname !== item.href;
+    const Icon = item.icon;
+
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        prefetch={true}
+        onMouseEnter={() => {
+          try {
+            router.prefetch(item.href);
+          } catch {}
+        }}
+        onClick={() => {
+          if (pathname !== item.href) {
+            setNavigatingTo(item.href);
+          }
+        }}
+        className={`flex items-center justify-between px-3 py-2 rounded-lg font-medium transition-all duration-100 active:scale-[0.97] select-none ${
+          isSelected
+            ? 'bg-emerald-600 text-white shadow-sm font-semibold'
+            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+        }`}
+      >
+        <div className="flex items-center gap-2.5">
+          <Icon className={`h-4 w-4 transition-transform duration-100 ${isSelected ? 'text-white scale-105' : 'text-slate-400'}`} />
+          <span>{item.label}</span>
+        </div>
+        {isPending && (
+          <div className="w-3.5 h-3.5 border-2 border-white/80 border-t-transparent rounded-full animate-spin shrink-0" />
+        )}
+      </Link>
+    );
+  };
 
   return (
     <aside className="w-64 bg-slate-900 text-slate-100 flex flex-col h-screen sticky top-0 shrink-0 border-r border-slate-800">
@@ -82,25 +146,7 @@ export const Sidebar: React.FC = () => {
             Core HR & Payroll
           </div>
           <div className="space-y-0.5">
-            {coreNav.map((item) => {
-              const isActive = pathname === item.href;
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  prefetch={true}
-                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-all duration-150 ${
-                    isActive
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  }`}
-                >
-                  <Icon className={`h-4 w-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                  {item.label}
-                </Link>
-              );
-            })}
+            {coreNav.map(renderNavItem)}
           </div>
         </div>
 
@@ -110,25 +156,7 @@ export const Sidebar: React.FC = () => {
             Talent & Operations
           </div>
           <div className="space-y-0.5">
-            {lifecycleNav.map((item) => {
-              const isActive = pathname === item.href;
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  prefetch={true}
-                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-all duration-150 ${
-                    isActive
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  }`}
-                >
-                  <Icon className={`h-4 w-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                  {item.label}
-                </Link>
-              );
-            })}
+            {lifecycleNav.map(renderNavItem)}
           </div>
         </div>
 
@@ -139,25 +167,7 @@ export const Sidebar: React.FC = () => {
               Governance & Admin
             </div>
             <div className="space-y-0.5">
-              {platformNav.map((item) => {
-                const isActive = pathname === item.href;
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    prefetch={true}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition-all duration-150 ${
-                      isActive
-                        ? 'bg-emerald-600 text-white shadow-sm'
-                        : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                    }`}
-                  >
-                    <Icon className={`h-4 w-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                    {item.label}
-                  </Link>
-                );
-              })}
+              {platformNav.map(renderNavItem)}
             </div>
           </div>
         )}

@@ -56,6 +56,11 @@ model Tenant {
   apiKeys                 ApiKey[]
   webhookSubscriptions    WebhookSubscription[]
   impersonationLogs       SupportImpersonationLog[]
+  supportTickets          SupportTicket[]
+  subscriptions           Subscription[]
+  featureFlags            FeatureFlag[]
+  passwordResetTokens     PasswordResetToken[]
+  aiProviderConfig        AIProviderConfiguration?
 }
 
 model User {
@@ -1290,3 +1295,91 @@ model SupportImpersonationLog {
 
   tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
+
+// -------------------------------------------------------------
+// 2M. SUPPORT TICKETS, PASSWORD RESETS, SUBSCRIPTIONS & FLAGS
+// -------------------------------------------------------------
+
+model SupportTicket {
+  id          String   @id @default(uuid())
+  tenantId    String
+  userId      String?
+  ticketCode  String
+  subject     String
+  description String
+  category    String   // PAYROLL, ATTENDANCE, LEAVE, IT_ACCESS, GENERAL
+  priority    String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  status      String   @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  assignedTo  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, ticketCode])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model Subscription {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  planName           String   // STARTER, GROWTH, ENTERPRISE
+  status             String   @default("TRIAL") // TRIAL, ACTIVE, PAST_DUE, CANCELLED
+  billingCycle       String   @default("MONTHLY") // MONTHLY, ANNUAL
+  maxEmployees       Int      @default(100)
+  maxLocations       Int      @default(5)
+  storageLimitGb     Int      @default(50)
+  trialStartsAt      DateTime @default(now())
+  trialEndsAt        DateTime
+  currentPeriodStart DateTime @default(now())
+  currentPeriodEnd   DateTime
+  cancelledAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model FeatureFlag {
+  id          String   @id @default(uuid())
+  tenantId    String
+  flagKey     String   // AI_COPILOT, WHATSAPP_NOTIFICATIONS, BIOMETRIC_INTEGRATION, ADVANCED_ANALYTICS
+  isEnabled   Boolean  @default(true)
+  configJson  String?  @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, flagKey])
+}
+
+model AIProviderConfiguration {
+  id               String   @id @default(uuid())
+  tenantId         String   @unique
+  provider         String   // GEMINI, OPENAI
+  encryptedApiKey  String
+  model            String?
+  isActive         Boolean  @default(true)
+  lastTestedAt     DateTime?
+  connectionStatus String   @default("NOT_CONFIGURED") // CONNECTED, NOT_CONFIGURED, CONNECTION_FAILED
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+
