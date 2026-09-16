@@ -139,7 +139,7 @@ export default function LoginPage() {
                 onClick={() => quickLogin('manager@aiautomationlabs.com')}
                 className="p-2 bg-slate-100 hover:bg-slate-200 rounded text-left border border-slate-200 text-slate-800 font-medium"
               >
-                👔 Engineering Mgr
+                👔 Manager
               </button>
               <button
                 type="button"

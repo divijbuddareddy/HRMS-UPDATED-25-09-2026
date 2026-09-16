@@ -24,8 +24,11 @@ export default function LeavePage() {
   const [myRequests, setMyRequests] = useState<any[]>([]);
   const [teamRequests, setTeamRequests] = useState<any[]>([]);
   const [ledgerLogs, setLedgerLogs] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'MY_LEAVES' | 'APPROVAL_QUEUE' | 'LEDGER_HISTORY'>('MY_LEAVES');
+  const [activeTab, setActiveTab] = useState<'MY_LEAVES' | 'APPROVAL_QUEUE' | 'LEDGER_HISTORY' | 'LEAVE_POLICIES'>('MY_LEAVES');
   const [loading, setLoading] = useState(true);
+
+  const isHRAdmin = user?.roles.some((r) => ['HR_ADMIN', 'COMPANY_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
+  const isManager = user?.roles.some((r) => ['MANAGER', 'HR_ADMIN', 'COMPANY_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
 
   // Apply modal
   const [isApplyOpen, setIsApplyOpen] = useState(false);
@@ -39,21 +42,33 @@ export default function LeavePage() {
   const [allEmployees, setAllEmployees] = useState<any[]>([]);
   const [applying, setApplying] = useState(false);
 
+  // HR Create Leave Type modal
+  const [isCreateTypeOpen, setIsCreateTypeOpen] = useState(false);
+  const [newTypeName, setNewTypeName] = useState('');
+  const [newTypeCode, setNewTypeCode] = useState('');
+  const [newTypeDescription, setNewTypeDescription] = useState('');
+  const [newTypeIsPaid, setNewTypeIsPaid] = useState(true);
+  const [newTypeQuota, setNewTypeQuota] = useState('18');
+  const [newTypeAccrualRate, setNewTypeAccrualRate] = useState('1.5');
+  const [newTypeMaxCarryForward, setNewTypeMaxCarryForward] = useState('45');
+  const [newTypeSandwichRule, setNewTypeSandwichRule] = useState(false);
+  const [creatingType, setCreatingType] = useState(false);
+
   const fetchLeaveData = async () => {
     setLoading(true);
     try {
+      // Types
+      const tRes = await fetch('/api/leave/types');
+      if (tRes.ok) {
+        const tData = await tRes.json();
+        setLeaveTypes(tData.leaveTypes || []);
+        if (tData.leaveTypes?.[0] && !leaveTypeId) setLeaveTypeId(tData.leaveTypes[0].id);
+      }
+
       if (user?.employee?.id) {
         // Balances
         const bRes = await fetch(`/api/leave/balances?employeeId=${user.employee.id}`);
         if (bRes.ok) setBalances((await bRes.json()).balances || []);
-
-        // Types
-        const tRes = await fetch('/api/leave/types');
-        if (tRes.ok) {
-          const tData = await tRes.json();
-          setLeaveTypes(tData.leaveTypes || []);
-          if (tData.leaveTypes?.[0]) setLeaveTypeId(tData.leaveTypes[0].id);
-        }
 
         // My requests
         const mRes = await fetch('/api/leave/requests?view=mine');
@@ -72,7 +87,6 @@ export default function LeavePage() {
       }
 
       // Team requests if manager / admin
-      const isManager = user?.roles.some((r) => ['MANAGER', 'HR_ADMIN', 'COMPANY_ADMIN'].includes(r));
       if (isManager) {
         const trRes = await fetch('/api/leave/requests?view=team');
         if (trRes.ok) setTeamRequests((await trRes.json()).requests || []);
@@ -87,6 +101,43 @@ export default function LeavePage() {
   useEffect(() => {
     fetchLeaveData();
   }, [user]);
+
+  const handleCreateLeaveType = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreatingType(true);
+    try {
+      const res = await fetch('/api/leave/types', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newTypeName,
+          code: newTypeCode,
+          description: newTypeDescription,
+          isPaid: newTypeIsPaid,
+          annualQuota: parseFloat(newTypeQuota) || 18,
+          accrualRate: parseFloat(newTypeAccrualRate) || 1.5,
+          maxCarryForward: parseFloat(newTypeMaxCarryForward) || 45,
+          isSandwichRuleEnabled: newTypeSandwichRule,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setIsCreateTypeOpen(false);
+        setNewTypeName('');
+        setNewTypeCode('');
+        setNewTypeDescription('');
+        await fetchLeaveData();
+        alert('New Leave Type & Policy successfully created and published for all employees!');
+      } else {
+        alert(data.error || 'Failed to create leave type');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setCreatingType(false);
+    }
+  };
 
   const handleApplyLeave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -171,7 +222,7 @@ export default function LeavePage() {
 
         {/* Top Action & Tab Strip */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setActiveTab('MY_LEAVES')}
               className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors ${
@@ -199,16 +250,38 @@ export default function LeavePage() {
             >
               Double-Entry Ledger
             </button>
+            {isHRAdmin && (
+              <button
+                onClick={() => setActiveTab('LEAVE_POLICIES')}
+                className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors ${
+                  activeTab === 'LEAVE_POLICIES' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Leave Policies & Types (HR)
+              </button>
+            )}
           </div>
 
-          <button
-            onClick={() => setIsApplyOpen(true)}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-xl shadow-sm shadow-emerald-600/20 flex items-center gap-1.5 transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Apply Leave
-          </button>
+          <div className="flex items-center gap-2">
+            {isHRAdmin && (
+              <button
+                onClick={() => setIsCreateTypeOpen(true)}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-medium text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Configure Leave Type
+              </button>
+            )}
+            <button
+              onClick={() => setIsApplyOpen(true)}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-xl shadow-sm shadow-emerald-600/20 flex items-center gap-1.5 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Apply Leave
+            </button>
+          </div>
         </div>
+
 
         {/* Tab 1: My Leaves */}
         {activeTab === 'MY_LEAVES' && (
@@ -385,6 +458,200 @@ export default function LeavePage() {
           </div>
         )}
 
+        {/* Tab 4: HR Leave Policies & Types */}
+        {activeTab === 'LEAVE_POLICIES' && isHRAdmin && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden space-y-4 p-6">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100">
+              <div>
+                <h4 className="text-sm font-bold text-slate-900">Configured Leave Types & Policies</h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Define leave types, accrual rules, sandwich policy, and carry-forward caps. Changes immediately reflect in employee balances and application forms.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsCreateTypeOpen(true)}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-sm flex items-center gap-1.5 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                New Leave Type
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-semibold">
+                  <tr>
+                    <th className="py-3 px-4">Leave Name</th>
+                    <th className="py-3 px-4">Code</th>
+                    <th className="py-3 px-4">Paid / Unpaid</th>
+                    <th className="py-3 px-4">Annual Quota</th>
+                    <th className="py-3 px-4">Accrual Rate</th>
+                    <th className="py-3 px-4">Max Carry Forward</th>
+                    <th className="py-3 px-4">Sandwich Rule</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {leaveTypes.map((type) => (
+                    <tr key={type.id} className="hover:bg-slate-50/70">
+                      <td className="py-3 px-4 font-semibold text-slate-900">
+                        {type.name}
+                        {type.description && <div className="text-[11px] text-slate-400 font-normal">{type.description}</div>}
+                      </td>
+                      <td className="py-3 px-4 font-mono font-bold text-slate-700">{type.code}</td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold ${
+                          type.isPaid ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                        }`}>
+                          {type.isPaid ? 'PAID' : 'UNPAID (LOP)'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 font-bold text-slate-900">{type.policy?.annualQuota ?? 18} days/yr</td>
+                      <td className="py-3 px-4 text-slate-700">{type.policy?.accrualRate ?? 1.5} days/{type.policy?.accrualFrequency?.toLowerCase() || 'mo'}</td>
+                      <td className="py-3 px-4 text-slate-700">{type.policy?.maxCarryForward ?? 45} days</td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold ${
+                          type.policy?.isSandwichRuleEnabled ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {type.policy?.isSandwichRuleEnabled ? 'ENABLED' : 'DISABLED'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* HR Create Leave Type Modal */}
+        {isCreateTypeOpen && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                <h3 className="font-semibold text-slate-900 text-base flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-emerald-600" />
+                  Configure New Leave Type & Policy
+                </h3>
+                <button onClick={() => setIsCreateTypeOpen(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateLeaveType} className="space-y-4 text-xs">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-medium text-slate-700 block mb-1">Leave Type Name *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g., Paternity Leave"
+                      value={newTypeName}
+                      onChange={(e) => setNewTypeName(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-medium text-slate-700 block mb-1">Code (Unique) *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g., PL"
+                      value={newTypeCode}
+                      onChange={(e) => setNewTypeCode(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg font-mono uppercase"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-medium text-slate-700 block mb-1">Description</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., 10 days for new fathers"
+                    value={newTypeDescription}
+                    onChange={(e) => setNewTypeDescription(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="font-medium text-slate-700 block mb-1">Annual Quota (Days)</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      required
+                      value={newTypeQuota}
+                      onChange={(e) => setNewTypeQuota(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-medium text-slate-700 block mb-1">Accrual Rate (Monthly)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      required
+                      value={newTypeAccrualRate}
+                      onChange={(e) => setNewTypeAccrualRate(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-medium text-slate-700 block mb-1">Carry Forward Cap</label>
+                    <input
+                      type="number"
+                      step="1"
+                      required
+                      value={newTypeMaxCarryForward}
+                      onChange={(e) => setNewTypeMaxCarryForward(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-6 pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={newTypeIsPaid}
+                      onChange={(e) => setNewTypeIsPaid(e.target.checked)}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    Paid Leave
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={newTypeSandwichRule}
+                      onChange={(e) => setNewTypeSandwichRule(e.target.checked)}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    Enable Sandwich Rule
+                  </label>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreateTypeOpen(false)}
+                    className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creatingType}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-medium shadow-sm shadow-emerald-600/20"
+                  >
+                    {creatingType ? 'Creating...' : 'Save & Publish Leave Type'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* Apply Leave Modal */}
         {isApplyOpen && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -533,3 +800,4 @@ export default function LeavePage() {
     </DashboardLayout>
   );
 }
+

@@ -84,6 +84,14 @@ export default function EmployeesPage() {
   const [importResult, setImportResult] = useState<any | null>(null);
   const [importing, setImporting] = useState(false);
 
+  // Quick inline creation states for Department, Designation, Branch in Add/Edit modals
+  const [empQuickAddType, setEmpQuickAddType] = useState<'NONE' | 'DEPT' | 'DESIG' | 'BRANCH'>('NONE');
+  const [newDeptName, setNewDeptName] = useState('');
+  const [newDesigTitle, setNewDesigTitle] = useState('');
+  const [newBranchCity, setNewBranchCity] = useState('');
+  const [newBranchName, setNewBranchName] = useState('');
+  const [savingOrgEntity, setSavingOrgEntity] = useState(false);
+
   const fetchEmployees = async () => {
     setLoading(true);
     try {
@@ -105,13 +113,123 @@ export default function EmployeesPage() {
       if (res.ok) {
         const data = await res.json();
         setOrgData(data);
-        if (data.legalEntities?.[0]) setFormData((f) => ({ ...f, legalEntityId: data.legalEntities[0].id }));
-        if (data.branchLocations?.[0]) setFormData((f) => ({ ...f, branchLocationId: data.branchLocations[0].id }));
-        if (data.departments?.[0]) setFormData((f) => ({ ...f, departmentId: data.departments[0].id }));
-        if (data.designations?.[0]) setFormData((f) => ({ ...f, designationId: data.designations[0].id }));
+        if (data.legalEntities?.[0] && !formData.legalEntityId) setFormData((f) => ({ ...f, legalEntityId: data.legalEntities[0].id }));
+        if (data.branchLocations?.[0] && !formData.branchLocationId) setFormData((f) => ({ ...f, branchLocationId: data.branchLocations[0].id }));
+        if (data.departments?.[0] && !formData.departmentId) setFormData((f) => ({ ...f, departmentId: data.departments[0].id }));
+        if (data.designations?.[0] && !formData.designationId) setFormData((f) => ({ ...f, designationId: data.designations[0].id }));
       }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleQuickCreateDept = async (isEdit = false) => {
+    if (!newDeptName.trim()) return;
+    setSavingOrgEntity(true);
+    try {
+      const code = newDeptName.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'DEPT';
+      const res = await fetch('/api/organization', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'DEPARTMENT',
+          data: { name: newDeptName.trim(), code },
+        }),
+      });
+      const created = await res.json();
+      if (res.ok) {
+        await fetchOrg();
+        if (isEdit) {
+          setEditFormData((prev: any) => ({ ...prev, departmentId: created.id }));
+        } else {
+          setFormData((prev) => ({ ...prev, departmentId: created.id }));
+        }
+        setNewDeptName('');
+        setEmpQuickAddType('NONE');
+      } else {
+        alert(created.error || 'Failed to create department');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setSavingOrgEntity(false);
+    }
+  };
+
+  const handleQuickCreateDesig = async (isEdit = false) => {
+    if (!newDesigTitle.trim()) return;
+    setSavingOrgEntity(true);
+    try {
+      const code = newDesigTitle.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'ROLE';
+      const departmentId = isEdit ? editFormData.departmentId : formData.departmentId;
+      const res = await fetch('/api/organization', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'DESIGNATION',
+          data: { title: newDesigTitle.trim(), code, departmentId: departmentId || null },
+        }),
+      });
+      const created = await res.json();
+      if (res.ok) {
+        await fetchOrg();
+        if (isEdit) {
+          setEditFormData((prev: any) => ({ ...prev, designationId: created.id }));
+        } else {
+          setFormData((prev) => ({ ...prev, designationId: created.id }));
+        }
+        setNewDesigTitle('');
+        setEmpQuickAddType('NONE');
+      } else {
+        alert(created.error || 'Failed to create designation');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setSavingOrgEntity(false);
+    }
+  };
+
+  const handleQuickCreateBranch = async (isEdit = false) => {
+    if (!newBranchCity.trim()) return;
+    setSavingOrgEntity(true);
+    try {
+      const name = newBranchName.trim() || `${newBranchCity.trim()} Office`;
+      const code = newBranchCity.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'LOC';
+      const legalEntityId = isEdit ? (editFormData.legalEntityId || orgData?.legalEntities?.[0]?.id) : (formData.legalEntityId || orgData?.legalEntities?.[0]?.id);
+      const res = await fetch('/api/organization', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'BRANCH',
+          data: {
+            name,
+            code,
+            city: newBranchCity.trim(),
+            state: 'KARNATAKA',
+            country: 'India',
+            legalEntityId,
+          },
+        }),
+      });
+      const created = await res.json();
+      if (res.ok) {
+        await fetchOrg();
+        if (isEdit) {
+          setEditFormData((prev: any) => ({ ...prev, branchLocationId: created.id }));
+        } else {
+          setFormData((prev) => ({ ...prev, branchLocationId: created.id }));
+        }
+        setNewBranchName('');
+        setNewBranchCity('');
+        setEmpQuickAddType('NONE');
+      } else {
+        alert(created.error || 'Failed to create branch location');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setSavingOrgEntity(false);
     }
   };
 
@@ -553,51 +671,185 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
+                  {/* Department */}
                   <div>
-                    <label className="font-medium text-slate-700 block mb-1">Department</label>
-                    <select
-                      value={editFormData.departmentId}
-                      onChange={(e) => setEditFormData({ ...editFormData, departmentId: e.target.value })}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
-                    >
-                      {orgData?.departments?.map((d: any) => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="font-medium text-slate-700">Department</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmpQuickAddType(empQuickAddType === 'DEPT' ? 'NONE' : 'DEPT');
+                          setNewDeptName('');
+                        }}
+                        className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
+                      >
+                        {empQuickAddType === 'DEPT' ? 'Cancel' : '+ Add New'}
+                      </button>
+                    </div>
+                    {empQuickAddType === 'DEPT' ? (
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          placeholder="New department name"
+                          value={newDeptName}
+                          onChange={(e) => setNewDeptName(e.target.value)}
+                          className="flex-1 p-2 bg-slate-50 border border-emerald-400 rounded-lg text-xs"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          disabled={savingOrgEntity || !newDeptName.trim()}
+                          onClick={() => handleQuickCreateDept(true)}
+                          className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg font-bold text-xs"
+                        >
+                          {savingOrgEntity ? '...' : 'Save'}
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={editFormData.departmentId}
+                        onChange={(e) => {
+                          if (e.target.value === '__NEW_DEPT__') {
+                            setEmpQuickAddType('DEPT');
+                          } else {
+                            setEditFormData({ ...editFormData, departmentId: e.target.value });
+                          }
+                        }}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                      >
+                        {orgData?.departments?.map((d: any) => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                        <option value="__NEW_DEPT__" className="text-emerald-600 font-semibold">+ Add New Department...</option>
+                      </select>
+                    )}
                   </div>
+
+                  {/* Designation */}
                   <div>
-                    <label className="font-medium text-slate-700 block mb-1">Designation</label>
-                    <select
-                      value={editFormData.designationId}
-                      onChange={(e) => setEditFormData({ ...editFormData, designationId: e.target.value })}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
-                    >
-                      {orgData?.designations?.map((d: any) => (
-                        <option key={d.id} value={d.id}>{d.title}</option>
-                      ))}
-                    </select>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="font-medium text-slate-700">Designation</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmpQuickAddType(empQuickAddType === 'DESIG' ? 'NONE' : 'DESIG');
+                          setNewDesigTitle('');
+                        }}
+                        className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
+                      >
+                        {empQuickAddType === 'DESIG' ? 'Cancel' : '+ Add New'}
+                      </button>
+                    </div>
+                    {empQuickAddType === 'DESIG' ? (
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          placeholder="New designation title"
+                          value={newDesigTitle}
+                          onChange={(e) => setNewDesigTitle(e.target.value)}
+                          className="flex-1 p-2 bg-slate-50 border border-emerald-400 rounded-lg text-xs"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          disabled={savingOrgEntity || !newDesigTitle.trim()}
+                          onClick={() => handleQuickCreateDesig(true)}
+                          className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg font-bold text-xs"
+                        >
+                          {savingOrgEntity ? '...' : 'Save'}
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={editFormData.designationId}
+                        onChange={(e) => {
+                          if (e.target.value === '__NEW_DESIG__') {
+                            setEmpQuickAddType('DESIG');
+                          } else {
+                            setEditFormData({ ...editFormData, designationId: e.target.value });
+                          }
+                        }}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                      >
+                        {orgData?.designations?.map((d: any) => (
+                          <option key={d.id} value={d.id}>{d.title}</option>
+                        ))}
+                        <option value="__NEW_DESIG__" className="text-emerald-600 font-semibold">+ Add New Designation...</option>
+                      </select>
+                    )}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
+                  {/* Branch Location */}
                   <div>
-                    <label className="font-medium text-slate-700 block mb-1">Branch Location</label>
-                    <select
-                      value={editFormData.branchLocationId}
-                      onChange={(e) => setEditFormData({ ...editFormData, branchLocationId: e.target.value })}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
-                    >
-                      {orgData?.branchLocations?.map((b: any) => (
-                        <option key={b.id} value={b.id}>{b.name} ({b.state})</option>
-                      ))}
-                    </select>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="font-medium text-slate-700">Branch Location</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmpQuickAddType(empQuickAddType === 'BRANCH' ? 'NONE' : 'BRANCH');
+                          setNewBranchCity('');
+                          setNewBranchName('');
+                        }}
+                        className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
+                      >
+                        {empQuickAddType === 'BRANCH' ? 'Cancel' : '+ Add New'}
+                      </button>
+                    </div>
+                    {empQuickAddType === 'BRANCH' ? (
+                      <div className="space-y-1.5 p-2 bg-slate-50 border border-emerald-400 rounded-lg">
+                        <input
+                          type="text"
+                          placeholder="City (e.g. Pune, Chennai)"
+                          value={newBranchCity}
+                          onChange={(e) => setNewBranchCity(e.target.value)}
+                          className="w-full p-1.5 bg-white border border-slate-200 rounded text-xs"
+                          autoFocus
+                        />
+                        <div className="flex gap-1.5">
+                          <input
+                            type="text"
+                            placeholder="Branch Name (Optional)"
+                            value={newBranchName}
+                            onChange={(e) => setNewBranchName(e.target.value)}
+                            className="flex-1 p-1.5 bg-white border border-slate-200 rounded text-xs"
+                          />
+                          <button
+                            type="button"
+                            disabled={savingOrgEntity || !newBranchCity.trim()}
+                            onClick={() => handleQuickCreateBranch(true)}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded font-bold text-xs"
+                          >
+                            {savingOrgEntity ? '...' : 'Save'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <select
+                        value={editFormData.branchLocationId}
+                        onChange={(e) => {
+                          if (e.target.value === '__NEW_BRANCH__') {
+                            setEmpQuickAddType('BRANCH');
+                          } else {
+                            setEditFormData({ ...editFormData, branchLocationId: e.target.value });
+                          }
+                        }}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                      >
+                        {orgData?.branchLocations?.map((b: any) => (
+                          <option key={b.id} value={b.id}>{b.name} ({b.state})</option>
+                        ))}
+                        <option value="__NEW_BRANCH__" className="text-emerald-600 font-semibold">+ Add New Branch Location...</option>
+                      </select>
+                    )}
                   </div>
                   <div>
                     <label className="font-medium text-slate-700 block mb-1">Status</label>
                     <select
                       value={editFormData.status}
                       onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value })}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                     >
                       <option value="ACTIVE">ACTIVE</option>
                       <option value="PROBATION">PROBATION</option>
@@ -727,51 +979,187 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
+                  {/* Department */}
                   <div>
-                    <label className="font-medium text-slate-700 block mb-1">Department *</label>
-                    <select
-                      value={formData.departmentId}
-                      onChange={(e) => setFormData({ ...formData, departmentId: e.target.value })}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
-                    >
-                      {orgData?.departments?.map((d: any) => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="font-medium text-slate-700">Department *</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmpQuickAddType(empQuickAddType === 'DEPT' ? 'NONE' : 'DEPT');
+                          setNewDeptName('');
+                        }}
+                        className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
+                      >
+                        {empQuickAddType === 'DEPT' ? 'Cancel' : '+ Add New'}
+                      </button>
+                    </div>
+                    {empQuickAddType === 'DEPT' ? (
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          placeholder="New department name"
+                          value={newDeptName}
+                          onChange={(e) => setNewDeptName(e.target.value)}
+                          className="flex-1 p-2 bg-slate-50 border border-emerald-400 rounded-lg text-xs"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          disabled={savingOrgEntity || !newDeptName.trim()}
+                          onClick={() => handleQuickCreateDept(false)}
+                          className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg font-bold text-xs"
+                        >
+                          {savingOrgEntity ? '...' : 'Save'}
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={formData.departmentId}
+                        onChange={(e) => {
+                          if (e.target.value === '__NEW_DEPT__') {
+                            setEmpQuickAddType('DEPT');
+                          } else {
+                            setFormData({ ...formData, departmentId: e.target.value });
+                          }
+                        }}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                      >
+                        {orgData?.departments?.map((d: any) => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                        <option value="__NEW_DEPT__" className="text-emerald-600 font-semibold">+ Add New Department...</option>
+                      </select>
+                    )}
                   </div>
+
+                  {/* Designation */}
                   <div>
-                    <label className="font-medium text-slate-700 block mb-1">Designation *</label>
-                    <select
-                      value={formData.designationId}
-                      onChange={(e) => setFormData({ ...formData, designationId: e.target.value })}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
-                    >
-                      {orgData?.designations?.map((d: any) => (
-                        <option key={d.id} value={d.id}>{d.title}</option>
-                      ))}
-                    </select>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="font-medium text-slate-700">Designation *</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmpQuickAddType(empQuickAddType === 'DESIG' ? 'NONE' : 'DESIG');
+                          setNewDesigTitle('');
+                        }}
+                        className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
+                      >
+                        {empQuickAddType === 'DESIG' ? 'Cancel' : '+ Add New'}
+                      </button>
+                    </div>
+                    {empQuickAddType === 'DESIG' ? (
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          placeholder="New designation title"
+                          value={newDesigTitle}
+                          onChange={(e) => setNewDesigTitle(e.target.value)}
+                          className="flex-1 p-2 bg-slate-50 border border-emerald-400 rounded-lg text-xs"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          disabled={savingOrgEntity || !newDesigTitle.trim()}
+                          onClick={() => handleQuickCreateDesig(false)}
+                          className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg font-bold text-xs"
+                        >
+                          {savingOrgEntity ? '...' : 'Save'}
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={formData.designationId}
+                        onChange={(e) => {
+                          if (e.target.value === '__NEW_DESIG__') {
+                            setEmpQuickAddType('DESIG');
+                          } else {
+                            setFormData({ ...formData, designationId: e.target.value });
+                          }
+                        }}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                      >
+                        {orgData?.designations?.map((d: any) => (
+                          <option key={d.id} value={d.id}>{d.title}</option>
+                        ))}
+                        <option value="__NEW_DESIG__" className="text-emerald-600 font-semibold">+ Add New Designation...</option>
+                      </select>
+                    )}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
+                  {/* Branch Location */}
                   <div>
-                    <label className="font-medium text-slate-700 block mb-1">Branch Location *</label>
-                    <select
-                      value={formData.branchLocationId}
-                      onChange={(e) => setFormData({ ...formData, branchLocationId: e.target.value })}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
-                    >
-                      {orgData?.branchLocations?.map((b: any) => (
-                        <option key={b.id} value={b.id}>{b.name} ({b.state})</option>
-                      ))}
-                    </select>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="font-medium text-slate-700">Branch Location *</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmpQuickAddType(empQuickAddType === 'BRANCH' ? 'NONE' : 'BRANCH');
+                          setNewBranchCity('');
+                          setNewBranchName('');
+                        }}
+                        className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
+                      >
+                        {empQuickAddType === 'BRANCH' ? 'Cancel' : '+ Add New'}
+                      </button>
+                    </div>
+                    {empQuickAddType === 'BRANCH' ? (
+                      <div className="space-y-1.5 p-2 bg-slate-50 border border-emerald-400 rounded-lg">
+                        <input
+                          type="text"
+                          placeholder="City (e.g. Pune, Chennai)"
+                          value={newBranchCity}
+                          onChange={(e) => setNewBranchCity(e.target.value)}
+                          className="w-full p-1.5 bg-white border border-slate-200 rounded text-xs"
+                          autoFocus
+                        />
+                        <div className="flex gap-1.5">
+                          <input
+                            type="text"
+                            placeholder="Branch Name (Optional)"
+                            value={newBranchName}
+                            onChange={(e) => setNewBranchName(e.target.value)}
+                            className="flex-1 p-1.5 bg-white border border-slate-200 rounded text-xs"
+                          />
+                          <button
+                            type="button"
+                            disabled={savingOrgEntity || !newBranchCity.trim()}
+                            onClick={() => handleQuickCreateBranch(false)}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded font-bold text-xs"
+                          >
+                            {savingOrgEntity ? '...' : 'Save'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <select
+                        value={formData.branchLocationId}
+                        onChange={(e) => {
+                          if (e.target.value === '__NEW_BRANCH__') {
+                            setEmpQuickAddType('BRANCH');
+                          } else {
+                            setFormData({ ...formData, branchLocationId: e.target.value });
+                          }
+                        }}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                      >
+                        {orgData?.branchLocations?.map((b: any) => (
+                          <option key={b.id} value={b.id}>{b.name} ({b.state})</option>
+                        ))}
+                        <option value="__NEW_BRANCH__" className="text-emerald-600 font-semibold">+ Add New Branch Location...</option>
+                      </select>
+                    )}
                   </div>
+
+                  {/* Legal Entity */}
                   <div>
                     <label className="font-medium text-slate-700 block mb-1">Legal Entity *</label>
                     <select
                       value={formData.legalEntityId}
                       onChange={(e) => setFormData({ ...formData, legalEntityId: e.target.value })}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                     >
                       {orgData?.legalEntities?.map((l: any) => (
                         <option key={l.id} value={l.id}>{l.name}</option>
