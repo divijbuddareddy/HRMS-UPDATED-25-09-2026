@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { isAdmin } from '@/lib/rbac';
-import { logAuditEvent } from '@/lib/audit';
+import { createAuditLog } from '@/lib/audit';
 
 export async function GET(req: NextRequest) {
   try {
@@ -96,14 +96,14 @@ export async function POST(req: NextRequest) {
       include: { policy: true },
     });
 
-    await logAuditEvent({
+    await createAuditLog({
       tenantId: user.tenantId,
-      actorId: user.id,
+      actorId: user.userId,
       actorRole: user.roles[0] || 'HR_ADMIN',
-      action: 'CREATE',
+      action: 'CREATE_LEAVE_TYPE',
       entityType: 'LEAVE',
       entityId: newLeaveType.id,
-      afterState: JSON.stringify(newLeaveType),
+      afterState: newLeaveType,
     });
 
     return NextResponse.json({

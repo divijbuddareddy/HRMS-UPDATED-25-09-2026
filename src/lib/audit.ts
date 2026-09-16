@@ -61,3 +61,5 @@ export async function auditUserAction(
     requestId,
   });
 }
+
+export const logAuditEvent = createAuditLog;
