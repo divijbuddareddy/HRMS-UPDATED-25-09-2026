@@ -11,14 +11,43 @@ export async function GET(req: NextRequest) {
     const searchParams = req.nextUrl.searchParams;
     const employeeId = searchParams.get('employeeId');
 
+    const isHR = user.roles.some((r) =>
+      ['PLATFORM_SUPER_ADMIN', 'COMPANY_ADMIN', 'HR_ADMIN', 'HR_EXECUTIVE'].includes(r)
+    );
+
+    const where: any = {
+      tenantId: user.tenantId,
+    };
+
+    if (isHR) {
+      if (employeeId) where.employeeId = employeeId;
+    } else {
+      // Employees strictly only see their own documents
+      where.employeeId = user.employeeId || 'none';
+    }
+
     const documents = await prisma.employeeDocument.findMany({
-      where: {
-        tenantId: user.tenantId,
-        ...(employeeId ? { employeeId } : {}),
-      },
+      where,
       include: {
-        employee: true,
-        signature: { include: { signer: true } },
+        employee: {
+          include: {
+            department: true,
+            designation: true,
+            branchLocation: true,
+            legalEntity: true,
+          },
+        },
+        template: true,
+        signature: {
+          include: {
+            signer: {
+              include: {
+                department: true,
+                designation: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -35,12 +64,19 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
-    const { employeeId, templateCode, customData } = body;
+    const { employeeId, templateCode, title, contentHtml, documentPdfUrl, customData } = body;
+
+    if (!employeeId) {
+      return NextResponse.json({ error: 'Employee ID is required' }, { status: 400 });
+    }
 
     const document = await generateEmployeeDocument({
       tenantId: user.tenantId,
       employeeId,
       templateCode: templateCode || 'OFFER_LETTER',
+      title,
+      contentHtml,
+      documentPdfUrl,
       customData,
       actor: user,
     });
@@ -50,3 +86,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+

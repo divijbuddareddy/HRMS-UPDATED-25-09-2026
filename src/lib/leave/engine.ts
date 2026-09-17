@@ -1,7 +1,7 @@
 import { prisma } from '../prisma';
 import { AuthUser } from '../types';
 import { createAuditLog } from '../audit';
-import { differenceInDays, isWeekend, eachDayOfInterval, startOfDay, endOfDay } from 'date-fns';
+import { differenceInDays, isWeekend, eachDayOfInterval, startOfDay, endOfDay, format, isSameDay } from 'date-fns';
 
 export interface LeaveBalanceSummary {
   leaveTypeId: string;
@@ -153,20 +153,41 @@ export async function validateAndApplyLeave(params: ValidateAndApplyLeaveParams)
     );
   }
 
-  // Check overlapping requests
+  // Check overlapping requests with normalized dates
+  const reqStart = startOfDay(params.startDate);
+  const reqEnd = endOfDay(params.endDate);
+
   const overlapping = await prisma.leaveRequest.findFirst({
     where: {
       tenantId: params.tenantId,
       employeeId: params.employeeId,
       status: { in: ['PENDING', 'APPROVED'] },
-      OR: [
-        { startDate: { lte: params.endDate }, endDate: { gte: params.startDate } },
-      ],
+      startDate: { lte: reqEnd },
+      endDate: { gte: reqStart },
     },
+    include: { leaveType: true },
   });
 
   if (overlapping) {
-    throw new Error('You already have a pending or approved leave request during these dates');
+    // Check if both are half-days on the same day with complementary sessions (e.g. First Half + Second Half)
+    const isSameDayReq = isSameDay(params.startDate, params.endDate) && isSameDay(overlapping.startDate, overlapping.endDate);
+    const isComplementary =
+      isSameDayReq &&
+      params.isHalfDay &&
+      overlapping.isHalfDay &&
+      params.halfDaySession &&
+      overlapping.halfDaySession &&
+      params.halfDaySession !== overlapping.halfDaySession;
+
+    if (!isComplementary) {
+      const fromStr = format(overlapping.startDate, 'dd MMM yyyy');
+      const toStr = format(overlapping.endDate, 'dd MMM yyyy');
+      const statusText = overlapping.status === 'APPROVED' ? 'an approved' : 'a pending';
+      const rangeText = fromStr === toStr ? fromStr : `${fromStr} to ${toStr}`;
+      throw new Error(
+        `You already have ${statusText} ${overlapping.leaveType?.name || 'leave'} request for ${rangeText}. Please choose different dates or withdraw the conflicting request.`
+      );
+    }
   }
 
   // Determine primary & backup approvers

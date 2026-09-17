@@ -24,11 +24,20 @@ export default function LeavePage() {
   const [myRequests, setMyRequests] = useState<any[]>([]);
   const [teamRequests, setTeamRequests] = useState<any[]>([]);
   const [ledgerLogs, setLedgerLogs] = useState<any[]>([]);
+  const isHRAdmin = user?.roles?.some((r) => ['HR_ADMIN', 'COMPANY_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
+  const isManager = user?.roles?.some((r) => ['MANAGER', 'HR_ADMIN', 'COMPANY_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
+  
   const [activeTab, setActiveTab] = useState<'MY_LEAVES' | 'APPROVAL_QUEUE' | 'LEDGER_HISTORY' | 'LEAVE_POLICIES'>('MY_LEAVES');
   const [loading, setLoading] = useState(true);
 
-  const isHRAdmin = user?.roles.some((r) => ['HR_ADMIN', 'COMPANY_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
-  const isManager = user?.roles.some((r) => ['MANAGER', 'HR_ADMIN', 'COMPANY_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
+  // Set default tab when user role is available
+  useEffect(() => {
+    if (isHRAdmin || isManager) {
+      setActiveTab('APPROVAL_QUEUE');
+    } else {
+      setActiveTab('MY_LEAVES');
+    }
+  }, [user]);
 
   // Apply modal
   const [isApplyOpen, setIsApplyOpen] = useState(false);
@@ -163,6 +172,7 @@ export default function LeavePage() {
         setReason('');
         setBackupApproverId('');
         await fetchLeaveData();
+        alert('✅ Leave application submitted successfully for manager approval!');
       } else {
         alert(data.error || 'Failed to submit leave');
       }
@@ -173,23 +183,51 @@ export default function LeavePage() {
     }
   };
 
+  const handleCancelLeave = async (id: string) => {
+    if (!confirm('Are you sure you want to cancel / withdraw this leave request?')) return;
+    try {
+      const res = await fetch('/api/leave/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leaveRequestId: id }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert('✅ Leave request has been withdrawn/cancelled.');
+        await fetchLeaveData();
+      } else {
+        alert(data.error || 'Failed to cancel leave');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
   const handleApprove = async (id: string, decision: 'APPROVED' | 'REJECTED') => {
     try {
+      let notes = `${decision} by manager`;
+      if (decision === 'REJECTED') {
+        const inputReason = prompt('Please provide a reason for rejecting this leave request (optional):');
+        if (inputReason === null) return; // User cancelled
+        if (inputReason.trim()) notes = inputReason.trim();
+      }
+
       const res = await fetch('/api/leave/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           leaveRequestId: id,
           decision,
-          notes: `${decision} by manager`,
+          notes,
         }),
       });
 
       if (res.ok) {
         await fetchLeaveData();
+        alert(`✅ Leave request successfully ${decision === 'APPROVED' ? 'Approved' : 'Rejected'}!`);
       } else {
         const d = await res.json();
-        alert(d.error || 'Approval failed');
+        alert(d.error || 'Approval action failed');
       }
     } catch (e: any) {
       alert(e.message);
@@ -223,24 +261,28 @@ export default function LeavePage() {
         {/* Top Action & Tab Strip */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex flex-wrap gap-2">
+            {isManager && (
+              <button
+                onClick={() => setActiveTab('APPROVAL_QUEUE')}
+                className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 ${
+                  activeTab === 'APPROVAL_QUEUE' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Team Approval Queue
+                {teamRequests.filter((r) => r.status === 'PENDING').length > 0 && (
+                  <span className="px-1.5 py-0.2 bg-amber-500 text-white text-[10px] rounded-full font-bold">
+                    {teamRequests.filter((r) => r.status === 'PENDING').length}
+                  </span>
+                )}
+              </button>
+            )}
             <button
               onClick={() => setActiveTab('MY_LEAVES')}
               className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors ${
                 activeTab === 'MY_LEAVES' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
-              My Leaves & History
-            </button>
-            <button
-              onClick={() => setActiveTab('APPROVAL_QUEUE')}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 ${
-                activeTab === 'APPROVAL_QUEUE' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              Approval Queue
-              {teamRequests.filter((r) => r.status === 'PENDING').length > 0 && (
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              )}
+              {isManager ? 'My Personal Leaves' : 'My Leaves & History'}
             </button>
             <button
               onClick={() => setActiveTab('LEDGER_HISTORY')}
@@ -296,6 +338,7 @@ export default function LeavePage() {
                     <th className="py-3 px-4">Reason</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4">Submitted At</th>
+                    <th className="py-3 px-4 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -315,6 +358,8 @@ export default function LeavePage() {
                               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                               : req.status === 'REJECTED'
                               ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                              : req.status === 'CANCELLED'
+                              ? 'bg-slate-100 text-slate-500 border border-slate-200'
                               : 'bg-amber-50 text-amber-700 border border-amber-200'
                           }`}
                         >
@@ -324,11 +369,21 @@ export default function LeavePage() {
                       <td className="py-3 px-4 text-slate-400 text-[11px]">
                         {format(new Date(req.createdAt), 'dd MMM yyyy, hh:mm a')}
                       </td>
+                      <td className="py-3 px-4 text-right">
+                        {req.status === 'PENDING' && (
+                          <button
+                            onClick={() => handleCancelLeave(req.id)}
+                            className="px-2.5 py-1 text-[11px] text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 font-semibold transition-colors"
+                          >
+                            Withdraw
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {myRequests.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
+                      <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
                         No leave requests applied yet.
                       </td>
                     </tr>
@@ -689,7 +744,12 @@ export default function LeavePage() {
                       type="date"
                       required
                       value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
+                      onChange={(e) => {
+                        setStartDate(e.target.value);
+                        if (isHalfDay || e.target.value > endDate) {
+                          setEndDate(e.target.value);
+                        }
+                      }}
                       className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
                     />
                   </div>
@@ -698,9 +758,11 @@ export default function LeavePage() {
                     <input
                       type="date"
                       required
-                      value={endDate}
+                      min={startDate}
+                      disabled={isHalfDay}
+                      value={isHalfDay ? startDate : endDate}
                       onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
+                      className={`w-full p-2 border border-slate-200 rounded-lg ${isHalfDay ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'bg-slate-50'}`}
                     />
                   </div>
                 </div>
@@ -710,11 +772,16 @@ export default function LeavePage() {
                     type="checkbox"
                     id="halfDay"
                     checked={isHalfDay}
-                    onChange={(e) => setIsHalfDay(e.target.checked)}
+                    onChange={(e) => {
+                      setIsHalfDay(e.target.checked);
+                      if (e.target.checked) {
+                        setEndDate(startDate);
+                      }
+                    }}
                     className="rounded text-emerald-600 focus:ring-emerald-500"
                   />
                   <label htmlFor="halfDay" className="font-medium text-slate-700 cursor-pointer">
-                    Half-Day Leave
+                    Half-Day Leave (Single Day)
                   </label>
                 </div>
 

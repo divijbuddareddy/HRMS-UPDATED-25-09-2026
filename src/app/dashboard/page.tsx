@@ -107,6 +107,28 @@ export default function DashboardPage() {
     }
   };
 
+  const handleApproveLeave = async (id: string, decision: 'APPROVED' | 'REJECTED') => {
+    try {
+      const res = await fetch('/api/leave/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leaveRequestId: id,
+          decision,
+          notes: `${decision} from Dashboard quick-action`,
+        }),
+      });
+      if (res.ok) {
+        await loadData();
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Action failed');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
   return (
     <DashboardLayout
       title={`Welcome back, ${user?.employee?.firstName || user?.email.split('@')[0]}!`}
@@ -259,7 +281,7 @@ export default function DashboardPage() {
                     <AlertCircle className="h-5 w-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-semibold text-slate-900">Pending Team Approvals</h3>
+                    <h3 className="text-base font-semibold text-slate-900">Pending Leave Approvals</h3>
                     <p className="text-xs text-slate-500">Leaves and Attendance Regularizations awaiting action</p>
                   </div>
                 </div>
@@ -276,7 +298,7 @@ export default function DashboardPage() {
               ) : (
                 <div className="divide-y divide-slate-100">
                   {teamRequests.map((req) => (
-                    <div key={req.id} className="py-3 flex items-center justify-between">
+                    <div key={req.id} className="py-3 flex items-center justify-between gap-4">
                       <div>
                         <div className="text-xs font-semibold text-slate-900">
                           {req.employee?.firstName} {req.employee?.lastName}{' '}
@@ -288,12 +310,20 @@ export default function DashboardPage() {
                         </div>
                         <div className="text-[11px] text-slate-600 italic mt-0.5">"{req.reason}"</div>
                       </div>
-                      <Link
-                        href="/leave"
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 text-slate-700 font-medium text-xs rounded-lg border border-slate-200 transition-colors"
-                      >
-                        Review
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleApproveLeave(req.id, 'APPROVED')}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg transition-colors shadow-sm"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleApproveLeave(req.id, 'REJECTED')}
+                          className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium text-xs rounded-lg border border-rose-200 transition-colors"
+                        >
+                          Reject
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
