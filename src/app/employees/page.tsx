@@ -21,6 +21,7 @@ import {
   Trash2,
   Lock,
   Check,
+  LogOut,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -587,17 +588,31 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
 
                 <div className="flex gap-2">
                   {isAdmin && (
-                    <button
-                      onClick={() => {
-                        const empToEdit = selectedEmp;
-                        setSelectedEmp(null);
-                        handleOpenEdit(empToEdit);
-                      }}
-                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-medium flex items-center gap-1"
-                    >
-                      <Edit className="h-3.5 w-3.5" />
-                      Edit Profile
-                    </button>
+                    <>
+                      <button
+                        onClick={() => {
+                          if (confirm(`Initiate separation/exit pipeline for ${selectedEmp.displayName}?`)) {
+                            window.location.href = `/exit`;
+                          }
+                        }}
+                        className="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl text-xs font-semibold flex items-center gap-1 border border-amber-200 transition-colors"
+                        title="Add employee to Separation & Exit pipeline"
+                      >
+                        <LogOut className="h-3.5 w-3.5" />
+                        Initiate Exit
+                      </button>
+                      <button
+                        onClick={() => {
+                          const empToEdit = selectedEmp;
+                          setSelectedEmp(null);
+                          handleOpenEdit(empToEdit);
+                        }}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-medium flex items-center gap-1"
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                        Edit Profile
+                      </button>
+                    </>
                   )}
                   <button
                     onClick={() => setSelectedEmp(null)}
@@ -1250,8 +1265,17 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
 
               {importResult && (
                 <div className={`p-3 rounded-xl text-xs ${importResult.failedCount > 0 ? 'bg-amber-50 border border-amber-200 text-amber-900' : 'bg-emerald-50 border border-emerald-200 text-emerald-900'}`}>
-                  <div className="font-semibold mb-1">
-                    {importResult.success ? `✅ Processed ${importResult.importedCount} employees successfully!` : `❌ Error: ${importResult.error}`}
+                  <div className="font-semibold mb-1 flex items-center gap-1.5">
+                    {importResult.success ? (
+                      <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
+                    )}
+                    <span>
+                      {importResult.success
+                        ? `Processed ${importResult.importedCount} employees successfully!`
+                        : `Error: ${importResult.error}`}
+                    </span>
                   </div>
                   {importResult.failedCount > 0 && (
                     <div className="space-y-1 mt-2 text-rose-700">

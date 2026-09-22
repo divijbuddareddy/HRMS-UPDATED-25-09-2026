@@ -34,12 +34,17 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
+    const targetEmployeeId = body.employeeId || user.employeeId;
+    if (!targetEmployeeId) {
+      return NextResponse.json({ error: 'Employee ID is required to submit exit/resignation' }, { status: 400 });
+    }
+
     const exitReq = await submitExitRequest({
       tenantId: user.tenantId,
-      employeeId: user.employeeId || body.employeeId,
-      requestedLwd: new Date(body.requestedLwd),
-      reason: body.reason,
-      reasonCategory: body.reasonCategory,
+      employeeId: targetEmployeeId,
+      requestedLwd: body.requestedLwd ? new Date(body.requestedLwd) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      reason: body.reason || 'Resignation submitted',
+      reasonCategory: body.reasonCategory || 'BETTER_OPPORTUNITY',
     });
 
     return NextResponse.json({ success: true, exitRequest: exitReq }, { status: 201 });

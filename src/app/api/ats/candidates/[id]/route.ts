@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { convertCandidateToEmployee } from '@/lib/ats/engine';
+import { initializeEmployeeOnboarding } from '@/lib/onboarding/engine';
 import { isAdmin } from '@/lib/rbac';
 import { createAuditLog } from '@/lib/audit';
 
@@ -25,13 +26,92 @@ export async function PUT(
     const body = await req.json();
     const { stage, action } = body;
 
-    if (action === 'HIRE') {
-      const employee = await convertCandidateToEmployee({
-        tenantId: user.tenantId,
-        candidateId: id,
-        actor: user,
+    if (action === 'ISSUE_OFFER') {
+      const { offeredCtc, joiningDate, designation } = body;
+      const offer = await prisma.candidateOffer.upsert({
+        where: { candidateId: id },
+        update: {
+          offeredCtc: offeredCtc ? parseFloat(offeredCtc) : 1200000,
+          joiningDate: joiningDate ? new Date(joiningDate) : new Date(),
+          designation: designation || 'Software Engineer',
+          status: 'ISSUED',
+        },
+        create: {
+          candidateId: id,
+          offeredCtc: offeredCtc ? parseFloat(offeredCtc) : 1200000,
+          joiningDate: joiningDate ? new Date(joiningDate) : new Date(),
+          designation: designation || 'Software Engineer',
+          status: 'ISSUED',
+        },
       });
-      return NextResponse.json({ success: true, message: 'Candidate hired successfully', employee });
+
+      await prisma.candidate.update({
+        where: { id },
+        data: { stage: 'OFFERED' },
+      });
+
+      await createAuditLog({
+        tenantId: user.tenantId,
+        actorId: user.userId,
+        actorRole: user.roles[0],
+        action: 'ISSUE_CANDIDATE_OFFER',
+        entityType: 'ATS_OFFER',
+        entityId: offer.id,
+        afterState: offer,
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: 'Offer letter issued to candidate successfully.',
+        offer,
+      });
+    }
+
+    if (action === 'SIGN_OFFER' || action === 'ACCEPT_OFFER' || action === 'HIRE' || action === 'ONBOARD') {
+      const candidate = await prisma.candidate.findUnique({
+        where: { id },
+        include: { offer: true },
+      });
+      if (!candidate) return NextResponse.json({ error: 'Candidate not found' }, { status: 404 });
+
+      // If offer exists, mark as ACCEPTED
+      if (candidate.offer) {
+        await prisma.candidateOffer.update({
+          where: { candidateId: id },
+          data: { status: 'ACCEPTED', acceptedAt: new Date() },
+        });
+      }
+
+      let employee;
+      if (candidate.hiredEmployeeId) {
+        employee = await prisma.employee.findUnique({ where: { id: candidate.hiredEmployeeId } });
+      } else {
+        employee = await convertCandidateToEmployee({
+          tenantId: user.tenantId,
+          candidateId: id,
+          actor: user,
+        });
+      }
+
+      // Initialize onboarding checklist workflow instance if not already existing
+      if (employee) {
+        const existingInstance = await prisma.onboardingInstance.findFirst({
+          where: { tenantId: user.tenantId, employeeId: employee.id },
+        });
+        if (!existingInstance) {
+          await initializeEmployeeOnboarding({
+            tenantId: user.tenantId,
+            employeeId: employee.id,
+          });
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Offer letter signed successfully! Candidate is now enrolled as an active employee in the Employees Directory.',
+        employee,
+        onboardingUrl: '/onboarding',
+      });
     }
 
     const updated = await prisma.candidate.update({

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
+import { X, Check, Laptop, Plus, Menu } from "lucide-react";
 
 interface Asset {
   id: string;
@@ -35,6 +36,7 @@ export default function AssetsPage() {
   const [loading, setLoading] = useState(true);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [assigneeId, setAssigneeId] = useState("");
   const [assignCondition, setAssignCondition] = useState("Brand New / Pristine");
   const [filterCategory, setFilterCategory] = useState("ALL");
@@ -62,8 +64,10 @@ export default function AssetsPage() {
     fetchAssetsAndEmployees();
   }, []);
 
-  const handleAssign = async () => {
+  const handleAssign = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!selectedAsset || !assigneeId) return;
+
     try {
       const res = await fetch(`/api/assets/${selectedAsset.id}/assign`, {
         method: "POST",
@@ -73,9 +77,10 @@ export default function AssetsPage() {
           condition: assignCondition,
         }),
       });
+
       if (res.ok) {
         setShowAssignModal(false);
-        setSelectedAsset(null);
+        setAssigneeId("");
         await fetchAssetsAndEmployees();
       }
     } catch (e) {
@@ -89,10 +94,10 @@ export default function AssetsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          returnCondition: "Good - Inspected",
-          remarks: "Returned during normal workflow / clearance",
+          condition: "Returned in Good Working Condition",
         }),
       });
+
       if (res.ok) {
         await fetchAssetsAndEmployees();
       }
@@ -112,27 +117,36 @@ export default function AssetsPage() {
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 antialiased font-sans overflow-hidden">
-      <Sidebar />
+      <Sidebar isOpenMobile={mobileMenuOpen} onCloseMobile={() => setMobileMenuOpen(false)} />
       <div className="flex-1 flex flex-col overflow-y-auto">
         {/* Header */}
-        <header className="px-8 py-5 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400">
-              Hardware & IT Asset Management
-            </h1>
-            <p className="text-xs text-slate-400 mt-1">
-              Track lifecycle, assignments, warranty, serialized hardware & automated exit clearance reconciliation
-            </p>
+        <header className="px-4 sm:px-8 py-4 sm:py-5 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="p-2 -ml-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 md:hidden focus:outline-none"
+              title="Open Navigation"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+            <div>
+              <h1 className="text-lg sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400">
+                Hardware & IT Asset Management
+              </h1>
+              <p className="text-xs text-slate-400 mt-1 hidden sm:block">
+                Track lifecycle, assignments, warranty, serialized hardware & automated exit clearance reconciliation
+              </p>
+            </div>
           </div>
           <div className="flex gap-3">
             <span className="px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700/60 text-slate-300 text-xs font-semibold flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              {assets.length} Total Inventory Units
+              {assets.length} Units
             </span>
           </div>
         </header>
 
-        <div className="p-8 space-y-6">
+        <div className="p-4 sm:p-8 space-y-6">
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
             <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
@@ -298,9 +312,9 @@ export default function AssetsPage() {
               </div>
               <button
                 onClick={() => setShowAssignModal(false)}
-                className="text-slate-400 hover:text-slate-200 text-lg font-bold"
+                className="p-1.5 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
               >
-                ✕
+                <X className="h-5 w-5" />
               </button>
             </div>
 

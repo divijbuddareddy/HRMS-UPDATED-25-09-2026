@@ -1,6 +1,7 @@
 import { prisma } from '../prisma';
 import { AuthUser } from '../types';
 import { createAuditLog } from '../audit';
+import { sendNotification } from '../notifications/dispatcher';
 
 // AI Match score calculation between Job requirements & Candidate skills
 export function calculateJobMatchScore(jobRequirements: string, candidateSkills?: string | null): number {
@@ -156,9 +157,14 @@ export async function applyCandidate(params: {
   expectedCtc?: number;
   noticePeriodDays?: number;
   resumeText?: string;
+  resumeFileName?: string;
+  resumeDataUrl?: string;
   skills?: string[]; // Array of skills
 }) {
-  const job = await prisma.jobRequisition.findUnique({ where: { id: params.jobRequisitionId } });
+  const job = await prisma.jobRequisition.findUnique({
+    where: { id: params.jobRequisitionId },
+    include: { tenant: true },
+  });
   if (!job) throw new Error('Job requisition not found');
 
   const skillsJson = params.skills ? JSON.stringify(params.skills) : JSON.stringify(['TypeScript', 'React', 'Node.js']);
@@ -182,6 +188,38 @@ export async function applyCandidate(params: {
       stage: 'APPLIED',
     },
   });
+
+  // Automated confirmation email dispatched to applicant
+  const tenantName = job.tenant?.name || 'our company';
+  const jobTitle = job.title;
+
+  try {
+    await sendNotification({
+      tenantId: params.tenantId,
+      channel: 'EMAIL',
+      templateCode: 'ATS_APPLICATION_CONFIRMATION',
+      title: `Thank you for applying! - ${jobTitle}`,
+      recipientEmail: candidate.email,
+      message: `Dear ${params.firstName},\n\nThank you for applying for the position of ${jobTitle} at ${tenantName}! We have successfully received your application and profile.\n\nOur recruitment and talent acquisition team is actively reviewing your qualifications. If your background matches our hiring requirements, we will reach out to you with next steps for an interview.\n\nThank you for your interest in joining ${tenantName}.\n\nBest regards,\nTalent Acquisition Team\n${tenantName}`,
+    });
+
+    await createAuditLog({
+      tenantId: params.tenantId,
+      actorId: 'SYSTEM',
+      actorRole: 'SYSTEM',
+      action: 'CANDIDATE_APPLICATION_EMAIL_SENT',
+      entityType: 'ATS_CANDIDATE',
+      entityId: candidate.id,
+      afterState: {
+        candidateId: candidate.id,
+        email: candidate.email,
+        jobTitle,
+        subject: `Thank you for applying! - ${jobTitle}`,
+      },
+    });
+  } catch (emailErr) {
+    console.error('Failed to send automated application confirmation email:', emailErr);
+  }
 
   return candidate;
 }

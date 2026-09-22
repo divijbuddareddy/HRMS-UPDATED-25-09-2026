@@ -2,7 +2,18 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { Sparkles, Lock, Mail, Building, ArrowRight, ShieldCheck } from 'lucide-react';
+import {
+  Sparkles,
+  Lock,
+  Mail,
+  Building,
+  ArrowRight,
+  ShieldCheck,
+  Crown,
+  ClipboardList,
+  Briefcase,
+  User,
+} from 'lucide-react';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -123,30 +134,34 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => quickLogin('admin@aiautomationlabs.com')}
-                className="p-2 bg-slate-100 hover:bg-slate-200 rounded text-left border border-slate-200 text-slate-800 font-medium"
+                className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-left border border-slate-200 text-slate-800 font-medium flex items-center gap-2 transition-colors"
               >
-                👑 Company Admin
+                <Crown className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                <span>Company Admin</span>
               </button>
               <button
                 type="button"
                 onClick={() => quickLogin('hr@aiautomationlabs.com')}
-                className="p-2 bg-slate-100 hover:bg-slate-200 rounded text-left border border-slate-200 text-slate-800 font-medium"
+                className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-left border border-slate-200 text-slate-800 font-medium flex items-center gap-2 transition-colors"
               >
-                📋 HR Admin
+                <ClipboardList className="h-3.5 w-3.5 text-sky-600 shrink-0" />
+                <span>HR Admin</span>
               </button>
               <button
                 type="button"
                 onClick={() => quickLogin('manager@aiautomationlabs.com')}
-                className="p-2 bg-slate-100 hover:bg-slate-200 rounded text-left border border-slate-200 text-slate-800 font-medium"
+                className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-left border border-slate-200 text-slate-800 font-medium flex items-center gap-2 transition-colors"
               >
-                👔 Manager
+                <Briefcase className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                <span>Manager</span>
               </button>
               <button
                 type="button"
                 onClick={() => quickLogin('emp1@aiautomationlabs.com')}
-                className="p-2 bg-slate-100 hover:bg-slate-200 rounded text-left border border-slate-200 text-slate-800 font-medium"
+                className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-left border border-slate-200 text-slate-800 font-medium flex items-center gap-2 transition-colors"
               >
-                💻 Employee (Priya)
+                <User className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                <span>Employee (Priya)</span>
               </button>
             </div>
           </div>

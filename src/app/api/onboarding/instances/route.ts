@@ -17,7 +17,16 @@ export async function GET(req: NextRequest) {
         ...(employeeId ? { employeeId } : {}),
       },
       include: {
-        employee: true,
+        employee: {
+          include: {
+            department: true,
+            designation: true,
+            branchLocation: true,
+            identity: true,
+            bank: true,
+            emergencyContacts: true,
+          },
+        },
         template: true,
         items: {
           include: { task: true },

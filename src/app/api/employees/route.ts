@@ -22,9 +22,15 @@ export async function GET(req: NextRequest) {
     }
 
     const scope = getUserDataScope(user, PERMISSIONS.EMPLOYEE_READ);
+    const searchParams = req.nextUrl.searchParams;
+    const includeOnboarding = searchParams.get('includeOnboarding') === 'true';
+    const statusParam = searchParams.get('status');
 
     // Build data scope filter
-    const where: any = { tenantId: user.tenantId };
+    const where: any = {
+      tenantId: user.tenantId,
+      ...(statusParam ? { status: statusParam } : !includeOnboarding ? { status: { notIn: ['ONBOARDING', 'DRAFT'] } } : {}),
+    };
     if (scope === 'OWN') {
       where.id = user.employeeId || 'none';
     } else if (scope === 'DIRECT_REPORTS') {

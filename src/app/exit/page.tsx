@@ -2,12 +2,30 @@
 
 import React, { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
+import { useAuth } from "@/context/AuthContext";
+import {
+  X,
+  Check,
+  Zap,
+  CheckCircle2,
+  Menu,
+  LogOut,
+  Plus,
+  UserMinus,
+  AlertCircle,
+  Building,
+  Users,
+  FileText,
+  Clock,
+  Calendar,
+} from "lucide-react";
 
 interface ExitRequest {
   id: string;
   resignation_date: string;
   last_working_day: string;
   reason: string;
+  reasonCategory?: string;
   status: string;
   notice_period_required: number;
   notice_period_served: number;
@@ -39,18 +57,87 @@ interface ExitRequest {
 }
 
 export default function ExitPage() {
+  const { user } = useAuth();
   const [exits, setExits] = useState<ExitRequest[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedExit, setSelectedExit] = useState<ExitRequest | null>(null);
   const [calculating, setCalculating] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"ACTIVE" | "SETTLED">("ACTIVE");
+
+  // Modal states for Resignation / Initiating Exit
+  const [isExitModalOpen, setIsExitModalOpen] = useState(false);
+  const [isSelfResignation, setIsSelfResignation] = useState(false);
+  const [submittingExit, setSubmittingExit] = useState(false);
+  const [exitForm, setExitForm] = useState({
+    employeeId: "",
+    requestedLwd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+    reasonCategory: "BETTER_OPPORTUNITY",
+    reason: "",
+  });
+
+  const isHRAdmin =
+    user?.roles?.includes("COMPANY_ADMIN") ||
+    user?.roles?.includes("PLATFORM_SUPER_ADMIN") ||
+    user?.roles?.includes("HR_ADMIN");
 
   const fetchExits = async () => {
     try {
       setLoading(true);
-      const res = await fetch("/api/exit/requests");
-      const data = await res.json();
-      if (data.exitRequests) setExits(data.exitRequests);
+      const [exitsRes, empRes] = await Promise.all([
+        fetch("/api/exit/requests"),
+        fetch("/api/employees"),
+      ]);
+
+      if (exitsRes.ok) {
+        const data = await exitsRes.json();
+        if (data.exits) {
+          const normalized: ExitRequest[] = data.exits.map((e: any) => ({
+            id: e.id,
+            resignation_date: e.resignationDate || e.resignation_date || e.createdAt,
+            last_working_day: e.approvedLwd || e.requestedLwd || e.last_working_day || new Date().toISOString(),
+            reason: e.reason || "Resignation",
+            reasonCategory: e.reasonCategory || "BETTER_OPPORTUNITY",
+            status: e.status || "INITIATED",
+            notice_period_required: e.noticePeriodRequiredDays || e.notice_period_required || 30,
+            notice_period_served: e.noticePeriodServedDays || e.notice_period_served || 30,
+            notice_shortfall_days: e.noticeShortfallDays || e.notice_shortfall_days || 0,
+            it_clearance: e.itClearanceStatus || e.it_clearance || "PENDING",
+            finance_clearance: e.financeClearanceStatus || e.finance_clearance || "PENDING",
+            admin_clearance: e.adminClearanceStatus || e.admin_clearance || "PENDING",
+            hr_clearance: e.hrClearanceStatus || e.hr_clearance || "PENDING",
+            employee: {
+              id: e.employee?.id || "",
+              first_name: e.employee?.firstName || e.employee?.first_name || "Employee",
+              last_name: e.employee?.lastName || e.employee?.last_name || "",
+              employee_code: e.employee?.employeeCode || e.employee?.employee_code || "EMP",
+              department: { name: e.employee?.department?.name || "General" },
+              designation: { title: e.employee?.designation?.title || "Staff" },
+              date_of_joining: e.employee?.joiningDate || e.employee?.date_of_joining || new Date().toISOString(),
+            },
+            fnf_settlement: e.settlement
+              ? {
+                  id: e.settlement.id,
+                  payable_days: e.settlement.payableDays || e.settlement.payable_days || 30,
+                  earned_salary: e.settlement.earnedSalary || e.settlement.earned_salary || 0,
+                  leave_encashment_amount: e.settlement.leaveEncashment || e.settlement.leave_encashment_amount || 0,
+                  gratuity_amount: e.settlement.gratuity || e.settlement.gratuity_amount || 0,
+                  notice_recovery_amount: e.settlement.noticeRecovery || e.settlement.notice_recovery_amount || 0,
+                  net_payable: e.settlement.netSettlement || e.settlement.net_payable || 0,
+                  status: e.settlement.status || "PENDING",
+                  settled_date: e.settlement.settledAt || e.settlement.settled_date,
+                }
+              : undefined,
+          }));
+          setExits(normalized);
+        }
+      }
+
+      if (empRes.ok) {
+        const empData = await empRes.json();
+        setEmployees(empData.employees || []);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -62,38 +149,99 @@ export default function ExitPage() {
     fetchExits();
   }, []);
 
+  const openResignModal = (isSelf: boolean) => {
+    setIsSelfResignation(isSelf);
+    setExitForm({
+      employeeId: isSelf ? user?.employeeId || "" : (employees[0]?.id || ""),
+      requestedLwd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+      reasonCategory: "BETTER_OPPORTUNITY",
+      reason: "",
+    });
+    setIsExitModalOpen(true);
+  };
+
+  const handleSubmitExit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!exitForm.employeeId) {
+      alert("Please select an employee");
+      return;
+    }
+    setSubmittingExit(true);
+    try {
+      const res = await fetch("/api/exit/requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(exitForm),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert("Separation / Resignation request successfully submitted and added to the Exit Pipeline!");
+        setIsExitModalOpen(false);
+        await fetchExits();
+      } else {
+        alert(data.error || "Failed to submit exit request");
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setSubmittingExit(false);
+    }
+  };
+
   const handleCalculateFnF = async (exitId: string) => {
     try {
       setCalculating(true);
       const res = await fetch(`/api/exit/requests/${exitId}/calculate`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
       });
       if (res.ok) {
         await fetchExits();
-        const updated = await fetch("/api/exit/requests").then((r) => r.json());
-        const found = updated.exitRequests?.find((e: ExitRequest) => e.id === exitId);
-        if (found) setSelectedExit(found);
+        const updatedData = await (await fetch("/api/exit/requests")).json();
+        const found = updatedData.exits?.find((x: any) => x.id === exitId);
+        if (found) {
+          setSelectedExit({
+            ...selectedExit!,
+            fnf_settlement: found.settlement ? {
+              id: found.settlement.id,
+              payable_days: found.settlement.payableDays || 30,
+              earned_salary: found.settlement.earnedSalary || 0,
+              leave_encashment_amount: found.settlement.leaveEncashment || 0,
+              gratuity_amount: found.settlement.gratuity || 0,
+              notice_recovery_amount: found.settlement.noticeRecovery || 0,
+              net_payable: found.settlement.netSettlement || 0,
+              status: found.settlement.status || 'PENDING',
+            } : undefined,
+          });
+        }
+      } else {
+        const d = await res.json();
+        alert(d.error || "Calculation failed");
       }
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      alert(e.message);
     } finally {
       setCalculating(false);
     }
   };
 
   const handleSettleFnF = async (exitId: string) => {
+    if (!confirm("Approve and execute Full & Final payout for this employee?")) return;
     try {
       const res = await fetch(`/api/exit/requests/${exitId}/settle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentReference: `NEFT-FNF-${Date.now().toString().slice(-6)}` }),
       });
       if (res.ok) {
+        alert("F&F Settlement approved and employee marked as Relieved.");
         await fetchExits();
         setSelectedExit(null);
+      } else {
+        const d = await res.json();
+        alert(d.error || "Failed to settle F&F");
       }
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      alert(e.message);
     }
   };
 
@@ -104,51 +252,77 @@ export default function ExitPage() {
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 antialiased font-sans overflow-hidden">
-      <Sidebar />
+      <Sidebar isOpenMobile={mobileMenuOpen} onCloseMobile={() => setMobileMenuOpen(false)} />
       <div className="flex-1 flex flex-col overflow-y-auto">
         {/* Header */}
-        <header className="px-8 py-5 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400">
-              Separation & Full & Final (F&F) Settlement
-            </h1>
-            <p className="text-xs text-slate-400 mt-1">
-              Automated notice period recovery, leave balance encashment, statutory gratuity & multi-dept clearance
-            </p>
+        <header className="px-4 sm:px-8 py-4 sm:py-5 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="p-2 -ml-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 md:hidden focus:outline-none"
+              title="Open Navigation"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+            <div>
+              <h1 className="text-lg sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400">
+                Separation & Exit Management
+              </h1>
+              <p className="text-xs text-slate-400 mt-1 hidden sm:block">
+                Employee resignation portal, notice period tracking, clearance checklist & Full and Final (F&F) settlement
+              </p>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <span className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-semibold">
-              {exits.length} Total Exit Cases
-            </span>
+
+          <div className="flex items-center gap-2">
+            {/* Employee Self-Service Resignation Button */}
+            <button
+              onClick={() => openResignModal(true)}
+              className="px-3.5 py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 font-semibold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-colors"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Submit Resignation
+            </button>
+
+            {/* HR / Admin Initiate Exit Button */}
+            {isHRAdmin && (
+              <button
+                onClick={() => openResignModal(false)}
+                className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-sm shadow-blue-600/20 flex items-center gap-1.5 transition-all"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add to Exit Pipeline
+              </button>
+            )}
           </div>
         </header>
 
-        <div className="p-8 space-y-6">
+        <div className="p-4 sm:p-8 space-y-6">
           {/* Summary KPIs */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
             <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Active Resignations</span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Active in Exit Pipeline</span>
               <p className="text-3xl font-extrabold text-amber-400 mt-2">
-                {exits.filter((e) => e.status === "RESIGNED" || e.status === "NOTICE_PERIOD").length}
+                {exits.filter((e) => e.status !== "SETTLED").length}
               </p>
-              <span className="text-xs text-amber-300/80 mt-1 inline-block">Serving notice period</span>
+              <span className="text-xs text-amber-300/80 mt-1 inline-block">Serving notice & in clearance</span>
             </div>
             <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">In Clearance Queue</span>
               <p className="text-3xl font-extrabold text-indigo-400 mt-2">
-                {exits.filter((e) => e.status === "CLEARANCE").length}
+                {exits.filter((e) => e.status === "INITIATED" || e.status === "CLEARANCE").length}
               </p>
               <span className="text-xs text-indigo-300/80 mt-1 inline-block">IT / Finance / HR checks</span>
             </div>
             <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Ready for F&F Payout</span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">F&F Computation Ready</span>
               <p className="text-3xl font-extrabold text-blue-400 mt-2">
-                {exits.filter((e) => e.status === "FNF_PENDING").length}
+                {exits.filter((e) => e.fnf_settlement && e.status !== "SETTLED").length}
               </p>
               <span className="text-xs text-blue-300/80 mt-1 inline-block">Statements calculated</span>
             </div>
             <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Fully Settled</span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Fully Settled & Relieved</span>
               <p className="text-3xl font-extrabold text-emerald-400 mt-2">
                 {exits.filter((e) => e.status === "SETTLED").length}
               </p>
@@ -159,15 +333,15 @@ export default function ExitPage() {
           {/* Filter Tabs */}
           <div className="flex gap-2 border-b border-slate-800 pb-2">
             {[
-              { key: "ACTIVE", label: "Active Exit Pipeline" },
-              { key: "SETTLED", label: "Settled & Relieved Records" },
+              { key: "ACTIVE", label: `Active Exit Pipeline (${exits.filter((e) => e.status !== "SETTLED").length})` },
+              { key: "SETTLED", label: `Settled & Relieved (${exits.filter((e) => e.status === "SETTLED").length})` },
             ].map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key as any)}
-                className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
+                className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
                   activeTab === tab.key
-                    ? "bg-blue-600/20 text-blue-400 border border-blue-500/30"
+                    ? "bg-blue-600/20 text-blue-400 border border-blue-500/30 shadow-sm"
                     : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
                 }`}
               >
@@ -186,7 +360,7 @@ export default function ExitPage() {
                     <th className="px-6 py-3.5">Designation & Dept</th>
                     <th className="px-6 py-3.5">Resigned Date</th>
                     <th className="px-6 py-3.5">Last Working Day</th>
-                    <th className="px-6 py-3.5">Notice Status</th>
+                    <th className="px-6 py-3.5">Reason Category</th>
                     <th className="px-6 py-3.5">Clearances</th>
                     <th className="px-6 py-3.5">F&F Net Settlement</th>
                     <th className="px-6 py-3.5">Status</th>
@@ -203,7 +377,7 @@ export default function ExitPage() {
                   ) : filteredExits.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="px-6 py-12 text-center text-slate-500">
-                        No exit records in this view.
+                        No exit records in this view. Click "Submit Resignation" or "Add to Exit Pipeline" above.
                       </td>
                     </tr>
                   ) : (
@@ -213,7 +387,7 @@ export default function ExitPage() {
                           <div className="font-semibold text-slate-100">
                             {item.employee?.first_name} {item.employee?.last_name}
                           </div>
-                          <div className="text-[11px] text-slate-500">{item.employee?.employee_code}</div>
+                          <div className="text-[11px] text-slate-500 font-mono">{item.employee?.employee_code}</div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="font-medium text-slate-300">{item.employee?.designation?.title}</div>
@@ -226,16 +400,9 @@ export default function ExitPage() {
                           {new Date(item.last_working_day).toLocaleDateString("en-IN")}
                         </td>
                         <td className="px-6 py-4">
-                          <div className="text-slate-200">
-                            {item.notice_period_served} / {item.notice_period_required} days
-                          </div>
-                          {item.notice_shortfall_days > 0 ? (
-                            <div className="text-[10px] text-rose-400 font-semibold">
-                              Shortfall: {item.notice_shortfall_days}d (Recoverable)
-                            </div>
-                          ) : (
-                            <div className="text-[10px] text-emerald-400">Full notice served</div>
-                          )}
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                            {item.reasonCategory?.replace(/_/g, " ") || "Better Opportunity"}
+                          </span>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex gap-1">
@@ -268,16 +435,6 @@ export default function ExitPage() {
                               }`}
                             >
                               AD
-                            </span>
-                            <span
-                              title="HR Clearance"
-                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${
-                                item.hr_clearance === "CLEARED"
-                                  ? "bg-emerald-950 text-emerald-400 border border-emerald-800"
-                                  : "bg-amber-950 text-amber-400 border border-amber-800"
-                              }`}
-                            >
-                              HR
                             </span>
                           </div>
                         </td>
@@ -326,6 +483,123 @@ export default function ExitPage() {
         </div>
       </div>
 
+      {/* Resignation / Add to Exit Pipeline Modal */}
+      {isExitModalOpen && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 text-slate-200">
+            <div className="flex justify-between items-start border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="font-bold text-base text-white flex items-center gap-2">
+                  <LogOut className="h-5 w-5 text-rose-400" />
+                  {isSelfResignation ? "Submit Resignation" : "Initiate Employee Exit & Add to Pipeline"}
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {isSelfResignation
+                    ? "Submit your formal resignation notice to your manager & HR"
+                    : "Add an employee into the official separation, clearance, and F&F settlement pipeline"}
+                </p>
+              </div>
+              <button
+                onClick={() => setIsExitModalOpen(false)}
+                className="p-1.5 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitExit} className="space-y-4 text-xs">
+              {/* Employee Selector */}
+              <div>
+                <label className="font-medium text-slate-300 block mb-1">Employee *</label>
+                {isSelfResignation ? (
+                  <input
+                    type="text"
+                    disabled
+                    value={`${user?.name || "Current User"} (${user?.email})`}
+                    className="w-full p-2.5 bg-slate-800/60 border border-slate-700 rounded-xl text-slate-400 font-medium"
+                  />
+                ) : (
+                  <select
+                    required
+                    value={exitForm.employeeId}
+                    onChange={(e) => setExitForm({ ...exitForm, employeeId: e.target.value })}
+                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">-- Select Employee to Exit --</option>
+                    {employees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.firstName} {emp.lastName} ({emp.employeeCode}) • {emp.department?.name || "General"}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Requested Last Working Day */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-medium text-slate-300 block mb-1">Reason Category *</label>
+                  <select
+                    value={exitForm.reasonCategory}
+                    onChange={(e) => setExitForm({ ...exitForm, reasonCategory: e.target.value })}
+                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="BETTER_OPPORTUNITY">Better Career Opportunity</option>
+                    <option value="CAREER_CHANGE">Higher Studies / Career Change</option>
+                    <option value="RELOCATION">Personal / Relocation</option>
+                    <option value="HEALTH_REASONS">Health / Medical</option>
+                    <option value="PERFORMANCE_EXIT">Performance Separation</option>
+                    <option value="MUTUAL_SEPARATION">Mutual Separation Agreement</option>
+                    <option value="OTHER">Other Reason</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-medium text-slate-300 block mb-1">Requested Last Working Day *</label>
+                  <input
+                    type="date"
+                    required
+                    value={exitForm.requestedLwd}
+                    onChange={(e) => setExitForm({ ...exitForm, requestedLwd: e.target.value })}
+                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Reason / Remarks */}
+              <div>
+                <label className="font-medium text-slate-300 block mb-1">Detailed Reason & Transition Remarks</label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="Provide context on transition handover, knowledge transfer, or feedback..."
+                  value={exitForm.reason}
+                  onChange={(e) => setExitForm({ ...exitForm, reason: e.target.value })}
+                  className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsExitModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-medium hover:bg-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingExit}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-600/20 flex items-center gap-1.5 transition-all"
+                >
+                  {submittingExit ? "Submitting..." : isSelfResignation ? "Confirm Resignation" : "Initiate Exit Pipeline"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* F&F Settlement Statement Modal */}
       {selectedExit && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -339,9 +613,9 @@ export default function ExitPage() {
               </div>
               <button
                 onClick={() => setSelectedExit(null)}
-                className="text-slate-400 hover:text-slate-200 text-lg font-bold"
+                className="p-1.5 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
               >
-                ✕
+                <X className="h-5 w-5" />
               </button>
             </div>
 
@@ -424,9 +698,10 @@ export default function ExitPage() {
                 <button
                   disabled={calculating}
                   onClick={() => handleCalculateFnF(selectedExit.id)}
-                  className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium rounded-xl text-xs shadow-md transition"
+                  className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium rounded-xl text-xs shadow-md transition flex items-center gap-1.5 mx-auto"
                 >
-                  {calculating ? "Calculating..." : "⚡ Run Automated F&F Engine"}
+                  <Zap className="h-4 w-4" />
+                  {calculating ? "Calculating..." : "Run Automated F&F Engine"}
                 </button>
               </div>
             )}
@@ -436,14 +711,14 @@ export default function ExitPage() {
               {selectedExit.fnf_settlement && selectedExit.status !== "SETTLED" && (
                 <button
                   onClick={() => handleSettleFnF(selectedExit.id)}
-                  className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-500/20"
+                  className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-1.5"
                 >
-                  ✓ Approve Payout & Mark Employee as Relieved
+                  <Check className="h-4 w-4" /> Approve Payout & Mark Employee as Relieved
                 </button>
               )}
               {selectedExit.status === "SETTLED" && (
-                <div className="flex-1 p-2 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-center text-xs text-emerald-400 font-semibold">
-                  ✓ Full and Final Settlement Executed & Relieving Letter Dispatched
+                <div className="flex-1 p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-center text-xs text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" /> Full and Final Settlement Executed & Relieving Letter Dispatched
                 </div>
               )}
             </div>

@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { jobRequisitionId, firstName, lastName, email, phone, currentCompany, expectedCtc, skills, resumeText } = body;
+    const { jobRequisitionId, firstName, lastName, email, phone, currentCompany, expectedCtc, skills, resumeText, resumeFileName, resumeDataUrl } = body;
 
     if (!jobRequisitionId || !firstName || !lastName || !email) {
       return NextResponse.json({ error: 'Missing required application fields' }, { status: 400 });
@@ -40,6 +40,12 @@ export async function POST(req: NextRequest) {
 
     const job = await prisma.jobRequisition.findUnique({ where: { id: jobRequisitionId } });
     if (!job) return NextResponse.json({ error: 'Job requisition not found' }, { status: 404 });
+
+    // Format resumeText to include attached file metadata if uploaded
+    let combinedResumeText = resumeText || '';
+    if (resumeFileName) {
+      combinedResumeText = `[Attached File: ${resumeFileName}]\n${combinedResumeText}`;
+    }
 
     const candidate = await applyCandidate({
       tenantId: job.tenantId,
@@ -51,7 +57,9 @@ export async function POST(req: NextRequest) {
       currentCompany,
       expectedCtc: expectedCtc ? parseFloat(expectedCtc) : undefined,
       skills: Array.isArray(skills) ? skills : (skills ? String(skills).split(',').map((s) => s.trim()) : []),
-      resumeText,
+      resumeText: combinedResumeText,
+      resumeFileName,
+      resumeDataUrl,
     });
 
     return NextResponse.json({

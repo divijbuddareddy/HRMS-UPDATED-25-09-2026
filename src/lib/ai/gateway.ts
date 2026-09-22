@@ -245,7 +245,7 @@ export async function processAiCopilotQuery(req: AiQueryRequest): Promise<AiQuer
     const deptStr = departments.map((d) => `${d.name}: ${d._count.employees} employees`).join('\n• ');
 
     return {
-      answer: `📊 **AI Automation Labs HR Overview**:\n\n• Total Active Headcount: **${totalEmp}** employees\n• Currently in Notice Period: **${noticeCount}**\n\n**Department Distribution**:\n• ${deptStr}`,
+      answer: `**AI Automation Labs HR Overview**:\n\n• Total Active Headcount: **${totalEmp}** employees\n• Currently in Notice Period: **${noticeCount}**\n\n**Department Distribution**:\n• ${deptStr}`,
       suggestedAction: { label: 'Manage Employees', href: '/employees' },
     };
   }

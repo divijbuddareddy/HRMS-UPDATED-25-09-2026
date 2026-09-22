@@ -408,7 +408,7 @@ export default function DocumentsPage() {
 
       const data = await res.json();
       if (res.ok) {
-        alert('✅ Offer Letter uploaded & dispatched for employee signature!');
+        alert('Offer Letter uploaded & dispatched for employee signature!');
         setIsUploadModalOpen(false);
         setUploadedFile(null);
         setSelectedEmployeeId('');
@@ -459,7 +459,7 @@ export default function DocumentsPage() {
 
       const data = await res.json();
       if (res.ok) {
-        alert('🎉 Offer Letter signed and submitted successfully! The HR team can now review the executed record.');
+        alert('Offer Letter signed and submitted successfully! The HR team can now review the executed record.');
         setSelectedDoc(null);
         await fetchData();
       } else {
@@ -1273,8 +1273,9 @@ export default function DocumentsPage() {
                                   className="w-full h-36 cursor-crosshair touch-none"
                                 />
                                 {!hasDrawnSignature && (
-                                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-slate-300 text-xs font-medium">
-                                    Sign on the dotted line ✍️
+                                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-slate-300 text-xs font-medium gap-1.5">
+                                    <PenTool className="h-3.5 w-3.5 text-slate-400" />
+                                    <span>Sign on the dotted line</span>
                                   </div>
                                 )}
                               </div>

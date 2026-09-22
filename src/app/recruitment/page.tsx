@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -10,11 +10,21 @@ import {
   Briefcase,
   Users,
   ChevronRight,
+  ChevronLeft,
+  ArrowLeft,
+  ArrowRight,
   CheckCircle,
+  CheckSquare,
+  UserCheck,
   X,
   Star,
   Send,
   Trash2,
+  FileText,
+  Paperclip,
+  ExternalLink,
+  UploadCloud,
+  Check,
 } from 'lucide-react';
 
 export default function RecruitmentPage() {
@@ -60,9 +70,33 @@ export default function RecruitmentPage() {
   const [newBranchName, setNewBranchName] = useState('');
   const [savingOrgEntity, setSavingOrgEntity] = useState(false);
 
-  // New Candidate modal
+  // Job Description PDF attachment states
+  const [attachedJdFile, setAttachedJdFile] = useState<{
+    name: string;
+    size: number;
+    type: string;
+    content?: string;
+  } | null>(null);
+  const [isDraggingJdFile, setIsDraggingJdFile] = useState(false);
+  const jdFileInputRef = useRef<HTMLInputElement>(null);
+
   const [isApplyOpen, setIsApplyOpen] = useState(false);
   const [jobId, setJobId] = useState('');
+  const [candResumeFile, setCandResumeFile] = useState<{
+    name: string;
+    size: number;
+    type: string;
+    content?: string;
+  } | null>(null);
+  const candFileInputRef = useRef<HTMLInputElement>(null);
+  const pipelineScrollRef = useRef<HTMLDivElement>(null);
+
+  const handleScrollPipeline = (direction: 'left' | 'right') => {
+    if (pipelineScrollRef.current) {
+      pipelineScrollRef.current.scrollBy({ left: direction === 'left' ? -320 : 320, behavior: 'smooth' });
+    }
+  };
+
   const [candForm, setCandForm] = useState({
     firstName: '',
     lastName: '',
@@ -111,19 +145,94 @@ export default function RecruitmentPage() {
     fetchATS();
   }, []);
 
+  const handleJdFileProcess = (file: File) => {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size exceeds 10MB limit. Please upload a smaller file.');
+      return;
+    }
+
+    const reader = new FileReader();
+    if (file.type.includes('text') || file.name.endsWith('.txt')) {
+      reader.onload = (e) => {
+        const text = e.target?.result as string;
+        setAttachedJdFile({
+          name: file.name,
+          size: file.size,
+          type: file.type || 'text/plain',
+          content: text,
+        });
+        if (!jobForm.description) {
+          setJobForm((prev) => ({ ...prev, description: text.substring(0, 2000) }));
+        }
+      };
+      reader.readAsText(file);
+    } else {
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        setAttachedJdFile({
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/pdf',
+          content: dataUrl,
+        });
+        if (!jobForm.description) {
+          setJobForm((prev) => ({
+            ...prev,
+            description: `[Attached JD Document: ${file.name} (${(file.size / 1024).toFixed(1)} KB)]\nRole overview and responsibilities are detailed in the attached PDF.`,
+          }));
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleJdFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleJdFileProcess(file);
+  };
+
+  const handleJdDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingJdFile(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleJdFileProcess(file);
+  };
+
+  const removeAttachedJdFile = () => {
+    setAttachedJdFile(null);
+    if (jdFileInputRef.current) {
+      jdFileInputRef.current.value = '';
+    }
+  };
+
   const handleCreateJob = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreatingJob(true);
     try {
+      let finalDescription = jobForm.description.trim();
+      if (attachedJdFile) {
+        if (!finalDescription) {
+          finalDescription = `[Attached JD Document: ${attachedJdFile.name} (${(attachedJdFile.size / 1024).toFixed(1)} KB)]\nDetailed job description provided in attached PDF.`;
+        } else if (!finalDescription.includes(attachedJdFile.name)) {
+          finalDescription = `[Attached JD Document: ${attachedJdFile.name}]\n${finalDescription}`;
+        }
+      }
+
       const res = await fetch('/api/ats/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(jobForm),
+        body: JSON.stringify({
+          ...jobForm,
+          description: finalDescription,
+        }),
       });
 
       const data = await res.json();
       if (res.ok) {
         setIsCreateJobOpen(false);
+        setAttachedJdFile(null);
+        if (jdFileInputRef.current) jdFileInputRef.current.value = '';
         setJobForm({
           title: '',
           code: '',
@@ -139,7 +248,7 @@ export default function RecruitmentPage() {
           requirements: '',
         });
         await fetchATS();
-        alert('🎉 Job Opening successfully published to ATS & Public Careers page!');
+        alert('Job Opening successfully published to ATS & Public Careers page!');
       } else {
         alert(data.error || 'Failed to create job opening');
       }
@@ -271,10 +380,13 @@ export default function RecruitmentPage() {
           jobRequisitionId: jobId,
           skills: candForm.skills.split(',').map((s) => s.trim()),
           expectedCtc: parseFloat(candForm.expectedCtc),
+          resumeFileName: candResumeFile?.name,
+          resumeDataUrl: candResumeFile?.content,
         }),
       });
       if (res.ok) {
         setIsApplyOpen(false);
+        setCandResumeFile(null);
         await fetchATS();
       } else {
         const d = await res.json();
@@ -303,6 +415,27 @@ export default function RecruitmentPage() {
     }
   };
 
+  const handleSignOffer = async (id: string) => {
+    if (!confirm('Accept and sign Offer Letter for this candidate? This will officially add them as an Active Employee in the Employees Tab.')) return;
+    try {
+      const res = await fetch(`/api/ats/candidates/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'SIGN_OFFER' }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Success! Offer letter signed. Candidate is now enrolled as Active Employee (${data.employee?.employeeCode}) in the Employees Tab.`);
+        setSelectedCandidate(null);
+        await fetchATS();
+      } else {
+        alert(data.error || 'Failed to sign offer');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
   const handleHireCandidate = async (id: string) => {
     if (!confirm('Are you sure you want to hire this candidate and create an active Employee profile?')) return;
     try {
@@ -313,11 +446,33 @@ export default function RecruitmentPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert(`🎉 Success! Candidate hired as Employee ${data.employee?.employeeCode}`);
+        alert(`Success! Candidate hired as Employee ${data.employee?.employeeCode}`);
         setSelectedCandidate(null);
         await fetchATS();
       } else {
         alert(data.error || 'Hire conversion failed');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
+  const handleOnboardCandidate = async (id: string) => {
+    try {
+      const res = await fetch(`/api/ats/candidates/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'ONBOARD' }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await fetchATS();
+        setSelectedCandidate(null);
+        if (confirm(`Candidate initialized into Onboarding workflow as Employee ${data.employee?.employeeCode}!\n\nWould you like to open the Employee Onboarding dashboard now?`)) {
+          window.location.href = '/onboarding';
+        }
+      } else {
+        alert(data.error || 'Failed to send to onboarding');
       }
     } catch (e: any) {
       alert(e.message);
@@ -408,49 +563,166 @@ export default function RecruitmentPage() {
 
         {/* Tab 1: Kanban Pipeline Board */}
         {activeTab === 'PIPELINE' && (
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            {stages.map((stage) => {
-              const stageCandidates = candidates.filter((c) => c.stage === stage);
-              return (
-                <div key={stage} className="bg-slate-100/70 p-3 rounded-2xl border border-slate-200/80 flex flex-col min-h-[400px]">
-                  <div className="flex justify-between items-center mb-3 px-1">
-                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">{stage}</span>
-                    <span className="text-[11px] font-bold bg-white text-slate-700 px-2 py-0.5 rounded-full border border-slate-200">
-                      {stageCandidates.length}
-                    </span>
-                  </div>
+          <div className="space-y-4">
+            {/* Pipeline Stage Flow Navigation Bar with Arrow Indicators */}
+            <div className="flex items-center justify-between bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm overflow-x-auto gap-3">
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-max">
+                <span className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider mr-1 sm:mr-2">
+                  Pipeline Progression:
+                </span>
+                {stages.map((stage, idx) => {
+                  const count = candidates.filter((c) => c.stage === stage).length;
+                  return (
+                    <React.Fragment key={stage}>
+                      <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700">
+                        <span>{stage}</span>
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-white text-slate-600 border border-slate-200">
+                          {count}
+                        </span>
+                      </div>
+                      {idx < stages.length - 1 && (
+                        <ArrowRight className="h-4 w-4 text-emerald-600 shrink-0" />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+              <div className="hidden sm:flex items-center gap-1.5 ml-2 shrink-0">
+                <button
+                  onClick={() => handleScrollPipeline('left')}
+                  className="p-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors flex items-center gap-1 text-xs font-medium"
+                  title="Navigate Pipeline Left"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => handleScrollPipeline('right')}
+                  className="p-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors flex items-center gap-1 text-xs font-medium"
+                  title="Navigate Pipeline Right"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
 
-                  <div className="space-y-2.5 flex-1">
-                    {stageCandidates.map((c) => (
-                      <div
-                        key={c.id}
-                        onClick={() => setSelectedCandidate(c)}
-                        className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-emerald-500 cursor-pointer transition-all space-y-2"
-                      >
-                        <div className="flex justify-between items-start">
-                          <div className="font-semibold text-xs text-slate-900">
-                            {c.firstName} {c.lastName}
+            {/* Kanban Columns Grid with Horizontal Scroll */}
+            <div
+              ref={pipelineScrollRef}
+              className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 overflow-x-auto pb-2 scroll-smooth"
+            >
+              {stages.map((stage, stageIdx) => {
+                const stageCandidates = candidates.filter((c) => c.stage === stage);
+                return (
+                  <div key={stage} className="bg-slate-100/70 p-3 rounded-2xl border border-slate-200/80 flex flex-col min-h-[420px] min-w-[240px]">
+                    <div className="flex justify-between items-center mb-3 px-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">{stage}</span>
+                      </div>
+                      <span className="text-[11px] font-bold bg-white text-slate-700 px-2 py-0.5 rounded-full border border-slate-200">
+                        {stageCandidates.length}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2.5 flex-1">
+                      {stageCandidates.map((c) => (
+                        <div
+                          key={c.id}
+                          onClick={() => setSelectedCandidate(c)}
+                          className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-emerald-500 cursor-pointer transition-all space-y-2.5 hover:shadow-md"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="font-semibold text-xs text-slate-900">
+                              {c.firstName} {c.lastName}
+                            </div>
+                            {c.aiMatchScore && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <Sparkles className="h-2.5 w-2.5" /> {c.aiMatchScore}% Match
+                              </span>
+                            )}
                           </div>
-                          {c.aiMatchScore && (
-                            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <Sparkles className="h-2.5 w-2.5" /> {c.aiMatchScore}% Match
-                            </span>
+
+                          <div className="text-[11px] text-slate-500 truncate">
+                            {c.jobRequisition?.title || 'Engineer'}
+                          </div>
+
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            Exp CTC: ₹{(c.expectedCtc / 100000).toFixed(1)}L
+                          </div>
+
+                          {/* Stage Arrow Navigation Actions on Candidate Card */}
+                          <div
+                            className="flex items-center justify-between pt-2 border-t border-slate-100 text-[10px]"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {stageIdx > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateStage(c.id, stages[stageIdx - 1])}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 border border-slate-200 font-medium transition-colors"
+                                title={`Move back to ${stages[stageIdx - 1]}`}
+                              >
+                                <ArrowLeft className="h-3 w-3 text-slate-500" />
+                                <span className="hidden sm:inline">{stages[stageIdx - 1]}</span>
+                              </button>
+                            ) : (
+                              <div />
+                            )}
+
+                            {stageIdx < stages.length - 1 ? (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateStage(c.id, stages[stageIdx + 1])}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 font-semibold transition-colors ml-auto"
+                                title={`Advance to ${stages[stageIdx + 1]}`}
+                              >
+                                <span>{stages[stageIdx + 1]}</span>
+                                <ArrowRight className="h-3 w-3 text-emerald-600" />
+                              </button>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-emerald-700 font-bold px-2 py-0.5 rounded bg-emerald-50 text-[10px] ml-auto">
+                                <CheckCircle className="h-3 w-3" /> Hired
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Sign Offer Action for Offered Candidates */}
+                          {c.stage === 'OFFERED' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSignOffer(c.id);
+                              }}
+                              className="w-full mt-1.5 py-1.5 px-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg font-bold text-[11px] shadow-sm shadow-blue-600/20 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                              title="Sign Offer Letter & Add to Employees Directory"
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                              Sign Offer (Add to Employees)
+                            </button>
+                          )}
+
+                          {/* Send to Onboarding Button for Hired Candidates */}
+                          {c.stage === 'HIRED' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOnboardCandidate(c.id);
+                              }}
+                              className="w-full mt-1.5 py-1.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg font-bold text-[11px] shadow-sm shadow-emerald-600/20 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                              title="Send Candidate to Employee Onboarding"
+                            >
+                              <CheckSquare className="h-3.5 w-3.5" />
+                              Onboard
+                            </button>
                           )}
                         </div>
-
-                        <div className="text-[11px] text-slate-500 truncate">
-                          {c.jobRequisition?.title || 'Engineer'}
-                        </div>
-
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          Exp CTC: ₹{(c.expectedCtc / 100000).toFixed(1)}L
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -828,16 +1100,92 @@ export default function RecruitmentPage() {
                   </div>
                 </div>
 
+                {/* Job Description with PDF upload support */}
                 <div>
-                  <label className="font-medium text-slate-700 block mb-1">Job Description *</label>
-                  <textarea
-                    rows={2}
-                    required
-                    placeholder="Describe the role responsibilities and team context..."
-                    value={jobForm.description}
-                    onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg"
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="font-medium text-slate-700 flex items-center gap-1.5">
+                      <span>Job Description *</span>
+                      {attachedJdFile && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 border border-emerald-300">
+                          <Check className="h-3 w-3" /> PDF Document Attached
+                        </span>
+                      )}
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => jdFileInputRef.current?.click()}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 transition-colors"
+                      title="Upload PDF or Document for Job Description"
+                    >
+                      <Paperclip className="h-3 w-3" />
+                      {attachedJdFile ? 'Replace PDF / Doc' : 'Upload PDF / Doc'}
+                    </button>
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={jdFileInputRef}
+                    onChange={handleJdFileChange}
+                    accept=".pdf,.doc,.docx,.txt,application/pdf"
+                    className="hidden"
                   />
+
+                  {attachedJdFile && (
+                    <div className="mb-2 p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-lg flex items-center justify-between">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="h-8 w-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                          <FileText className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-slate-800 truncate">{attachedJdFile.name}</p>
+                          <p className="text-[10px] text-slate-500 font-mono">
+                            {(attachedJdFile.size / 1024).toFixed(1)} KB • PDF Document
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={removeAttachedJdFile}
+                        className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        title="Remove attached PDF"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDraggingJdFile(true);
+                    }}
+                    onDragLeave={() => setIsDraggingJdFile(false)}
+                    onDrop={handleJdDrop}
+                    className={`relative rounded-lg transition-all ${
+                      isDraggingJdFile ? 'ring-2 ring-emerald-500 bg-emerald-50/50' : ''
+                    }`}
+                  >
+                    <textarea
+                      rows={2}
+                      required={!attachedJdFile}
+                      placeholder={
+                        attachedJdFile
+                          ? 'Optional notes or summary (full spec provided in attached PDF)...'
+                          : 'Describe the role responsibilities and team context, or click Upload PDF above...'
+                      }
+                      value={jobForm.description}
+                      onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:border-emerald-500 transition-colors"
+                    />
+
+                    {!attachedJdFile && (
+                      <div className="absolute right-2 bottom-2.5 flex items-center gap-1 text-[11px] text-slate-400 pointer-events-none">
+                        <UploadCloud className="h-3.5 w-3.5 text-slate-400" />
+                        <span>Drop PDF here</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div>
@@ -911,21 +1259,85 @@ export default function RecruitmentPage() {
                   </div>
                 </div>
 
-                <div className="space-y-1.5 pt-2">
-                  <span className="font-semibold text-slate-700 block">Move Candidate to Next Stage:</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {stages.map((st) => (
-                      <button
-                        key={st}
-                        onClick={() => handleUpdateStage(selectedCandidate.id, st)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border ${
-                          selectedCandidate.stage === st
-                            ? 'bg-slate-900 text-white border-slate-900'
-                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        {st}
-                      </button>
+                {/* Attached Resume Document */}
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-800 flex items-center gap-1.5">
+                      <Paperclip className="h-3.5 w-3.5 text-slate-500" />
+                      Attached Resume / Application Details
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-100 text-emerald-800">
+                      Verified
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200">
+                    <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-md">
+                      <FileText className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-slate-800 truncate">
+                        {selectedCandidate.resumeText?.startsWith('[Attached File:')
+                          ? selectedCandidate.resumeText.split('\n')[0].replace('[Attached File:', '').replace(']', '').trim()
+                          : `${selectedCandidate.firstName}_${selectedCandidate.lastName}_Resume.pdf`}
+                      </div>
+                      <div className="text-[10px] text-slate-400">Candidate Attached Profile & Skill Matrix</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2 pt-2">
+                  <span className="font-semibold text-slate-700 block text-xs">Stage Navigation & Progression:</span>
+                  
+                  {/* Previous / Next Arrow Action Bar */}
+                  <div className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+                    <button
+                      type="button"
+                      disabled={stages.indexOf(selectedCandidate.stage) === 0}
+                      onClick={() => {
+                        const currIdx = stages.indexOf(selectedCandidate.stage);
+                        if (currIdx > 0) handleUpdateStage(selectedCandidate.id, stages[currIdx - 1]);
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm transition-colors"
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" /> Previous Stage
+                    </button>
+
+                    <div className="text-xs font-bold text-slate-900 bg-white px-3 py-1 rounded-lg border border-slate-200 shadow-sm">
+                      {selectedCandidate.stage}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={stages.indexOf(selectedCandidate.stage) === stages.length - 1}
+                      onClick={() => {
+                        const currIdx = stages.indexOf(selectedCandidate.stage);
+                        if (currIdx < stages.length - 1) handleUpdateStage(selectedCandidate.id, stages[currIdx + 1]);
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm transition-colors"
+                    >
+                      Next Stage <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Stage Flow Breadcrumbs with Arrow Connectors */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    {stages.map((st, idx) => (
+                      <React.Fragment key={st}>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateStage(selectedCandidate.id, st)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors ${
+                            selectedCandidate.stage === st
+                              ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          {st}
+                        </button>
+                        {idx < stages.length - 1 && (
+                          <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        )}
+                      </React.Fragment>
                     ))}
                   </div>
                 </div>
@@ -934,15 +1346,31 @@ export default function RecruitmentPage() {
               <div className="pt-3 border-t border-slate-100 flex justify-between items-center">
                 <button
                   onClick={() => setSelectedCandidate(null)}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-medium"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium transition-colors"
                 >
                   Close
                 </button>
 
-                {selectedCandidate.stage !== 'HIRED' && (
+                {selectedCandidate.stage === 'HIRED' ? (
+                  <button
+                    onClick={() => handleOnboardCandidate(selectedCandidate.id)}
+                    className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-sm shadow-emerald-600/20 flex items-center gap-1.5 transition-all"
+                  >
+                    <CheckSquare className="h-4 w-4" />
+                    Send to Onboarding
+                  </button>
+                ) : selectedCandidate.stage === 'OFFERED' ? (
+                  <button
+                    onClick={() => handleSignOffer(selectedCandidate.id)}
+                    className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 flex items-center gap-1.5 transition-all"
+                  >
+                    <FileText className="h-4 w-4" />
+                    Sign Offer & Add to Employees
+                  </button>
+                ) : (
                   <button
                     onClick={() => handleHireCandidate(selectedCandidate.id)}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-emerald-600/20 flex items-center gap-1.5"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-emerald-600/20 flex items-center gap-1.5 transition-colors"
                   >
                     <CheckCircle className="h-4 w-4" />
                     Hire as Active Employee
@@ -1029,10 +1457,92 @@ export default function RecruitmentPage() {
                   />
                 </div>
 
+                {/* Attach Resume Document in ATS */}
+                <div>
+                  <label className="font-medium text-slate-700 flex items-center justify-between mb-1">
+                    <span className="flex items-center gap-1.5">
+                      <Paperclip className="h-3.5 w-3.5 text-emerald-600" />
+                      Attach Resume / CV
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-normal">PDF, DOCX, DOC, TXT (Max 10MB)</span>
+                  </label>
+
+                  <input
+                    type="file"
+                    ref={candFileInputRef}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        if (file.size > 10 * 1024 * 1024) {
+                          alert('File size exceeds 10MB limit.');
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          setCandResumeFile({
+                            name: file.name,
+                            size: file.size,
+                            type: file.type || 'application/pdf',
+                            content: ev.target?.result as string,
+                          });
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    accept=".pdf,.docx,.doc,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                    className="hidden"
+                  />
+
+                  {candResumeFile ? (
+                    <div className="p-2.5 bg-slate-50 border border-emerald-300 rounded-xl flex items-center justify-between">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg shrink-0">
+                          <FileText className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-medium text-slate-900 truncate text-xs flex items-center gap-1.5">
+                            {candResumeFile.name}
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <Check className="h-3 w-3" /> Attached
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            {(candResumeFile.size / 1024).toFixed(1)} KB
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCandResumeFile(null);
+                          if (candFileInputRef.current) candFileInputRef.current.value = '';
+                        }}
+                        className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        title="Remove attached file"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => candFileInputRef.current?.click()}
+                      className="border-2 border-dashed border-slate-200 hover:border-emerald-500/60 rounded-xl p-3 text-center cursor-pointer bg-slate-50 hover:bg-slate-100/80 transition-all"
+                    >
+                      <div className="flex items-center justify-center gap-2 text-slate-600 text-xs">
+                        <UploadCloud className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span className="font-medium">Click to upload candidate resume file</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() => setIsApplyOpen(false)}
+                    onClick={() => {
+                      setIsApplyOpen(false);
+                      setCandResumeFile(null);
+                    }}
                     className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-medium"
                   >
                     Cancel

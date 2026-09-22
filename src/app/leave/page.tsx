@@ -172,7 +172,7 @@ export default function LeavePage() {
         setReason('');
         setBackupApproverId('');
         await fetchLeaveData();
-        alert('✅ Leave application submitted successfully for manager approval!');
+        alert('Leave application submitted successfully for manager approval!');
       } else {
         alert(data.error || 'Failed to submit leave');
       }
@@ -193,7 +193,7 @@ export default function LeavePage() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert('✅ Leave request has been withdrawn/cancelled.');
+        alert('Leave request has been withdrawn/cancelled.');
         await fetchLeaveData();
       } else {
         alert(data.error || 'Failed to cancel leave');
@@ -224,7 +224,7 @@ export default function LeavePage() {
 
       if (res.ok) {
         await fetchLeaveData();
-        alert(`✅ Leave request successfully ${decision === 'APPROVED' ? 'Approved' : 'Rejected'}!`);
+        alert(`Leave request successfully ${decision === 'APPROVED' ? 'Approved' : 'Rejected'}!`);
       } else {
         const d = await res.json();
         alert(d.error || 'Approval action failed');

@@ -435,63 +435,73 @@ export async function executePayrollCycleRun(params: {
   let totalNet = 0;
   let totalEmployerCost = 0;
 
-  // Process all employees transactionally / deterministically
-  for (const emp of activeEmployees) {
-    const calculated = await computeEmployeePayrollItem({
-      tenantId,
-      employeeId: emp.id,
-      month,
-      year,
-      totalCalendarDays: daysInMonth,
-    });
-
-    totalGross += calculated.grossEarnings;
-    totalDeductions += calculated.totalDeductions;
-    totalNet += calculated.netSalary;
-    totalEmployerCost += calculated.employerCost;
-
-    await prisma.payrollItem.upsert({
-      where: {
-        payrollRunId_employeeId: {
-          payrollRunId: run.id,
+  // Process all employees concurrently in high-performance batches (scaleable to 1000+ employees)
+  const BATCH_SIZE = 25;
+  for (let i = 0; i < activeEmployees.length; i += BATCH_SIZE) {
+    const chunk = activeEmployees.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(
+      chunk.map(async (emp) => {
+        const calculated = await computeEmployeePayrollItem({
+          tenantId,
           employeeId: emp.id,
-        },
-      },
-      update: {
-        ctc: calculated.ctc,
-        payableDays: calculated.payableDays,
-        workedDays: calculated.workedDays,
-        paidLeaveDays: calculated.paidLeaveDays,
-        unpaidLopDays: calculated.unpaidLopDays,
-        grossEarnings: calculated.grossEarnings,
-        totalDeductions: calculated.totalDeductions,
-        netSalary: calculated.netSalary,
-        employerCost: calculated.employerCost,
-        earningsBreakdown: JSON.stringify(calculated.earningsBreakdown),
-        deductionsBreakdown: JSON.stringify(calculated.deductionsBreakdown),
-        employerBreakdown: JSON.stringify(calculated.employerBreakdown),
-        taxRegime: calculated.taxRegime,
-        incomeTaxMonthly: calculated.incomeTaxMonthly,
-      },
-      create: {
-        payrollRunId: run.id,
-        employeeId: emp.id,
-        ctc: calculated.ctc,
-        payableDays: calculated.payableDays,
-        workedDays: calculated.workedDays,
-        paidLeaveDays: calculated.paidLeaveDays,
-        unpaidLopDays: calculated.unpaidLopDays,
-        grossEarnings: calculated.grossEarnings,
-        totalDeductions: calculated.totalDeductions,
-        netSalary: calculated.netSalary,
-        employerCost: calculated.employerCost,
-        earningsBreakdown: JSON.stringify(calculated.earningsBreakdown),
-        deductionsBreakdown: JSON.stringify(calculated.deductionsBreakdown),
-        employerBreakdown: JSON.stringify(calculated.employerBreakdown),
-        taxRegime: calculated.taxRegime,
-        incomeTaxMonthly: calculated.incomeTaxMonthly,
-      },
-    });
+          month,
+          year,
+          totalCalendarDays: daysInMonth,
+        });
+
+        await prisma.payrollItem.upsert({
+          where: {
+            payrollRunId_employeeId: {
+              payrollRunId: run.id,
+              employeeId: emp.id,
+            },
+          },
+          update: {
+            ctc: calculated.ctc,
+            payableDays: calculated.payableDays,
+            workedDays: calculated.workedDays,
+            paidLeaveDays: calculated.paidLeaveDays,
+            unpaidLopDays: calculated.unpaidLopDays,
+            grossEarnings: calculated.grossEarnings,
+            totalDeductions: calculated.totalDeductions,
+            netSalary: calculated.netSalary,
+            employerCost: calculated.employerCost,
+            earningsBreakdown: JSON.stringify(calculated.earningsBreakdown),
+            deductionsBreakdown: JSON.stringify(calculated.deductionsBreakdown),
+            employerBreakdown: JSON.stringify(calculated.employerBreakdown),
+            taxRegime: calculated.taxRegime,
+            incomeTaxMonthly: calculated.incomeTaxMonthly,
+          },
+          create: {
+            payrollRunId: run.id,
+            employeeId: emp.id,
+            ctc: calculated.ctc,
+            payableDays: calculated.payableDays,
+            workedDays: calculated.workedDays,
+            paidLeaveDays: calculated.paidLeaveDays,
+            unpaidLopDays: calculated.unpaidLopDays,
+            grossEarnings: calculated.grossEarnings,
+            totalDeductions: calculated.totalDeductions,
+            netSalary: calculated.netSalary,
+            employerCost: calculated.employerCost,
+            earningsBreakdown: JSON.stringify(calculated.earningsBreakdown),
+            deductionsBreakdown: JSON.stringify(calculated.deductionsBreakdown),
+            employerBreakdown: JSON.stringify(calculated.employerBreakdown),
+            taxRegime: calculated.taxRegime,
+            incomeTaxMonthly: calculated.incomeTaxMonthly,
+          },
+        });
+
+        return calculated;
+      })
+    );
+
+    for (const calculated of results) {
+      totalGross += calculated.grossEarnings;
+      totalDeductions += calculated.totalDeductions;
+      totalNet += calculated.netSalary;
+      totalEmployerCost += calculated.employerCost;
+    }
   }
 
   // Update run summary

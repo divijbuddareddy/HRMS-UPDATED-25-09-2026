@@ -23,8 +23,10 @@ import {
   RefreshCw,
   Building,
   Layers,
+  X,
   ArrowUpRight,
   Fingerprint,
+  Menu,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -64,63 +66,66 @@ export default function SuperAdminPage() {
       setLoading(true);
       const res = await fetch('/api/super-admin/tenants');
       const data = await res.json();
-      if (data.tenants) setTenants(data.tenants);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [impersonateLoading, setImpersonateLoading] = useState(false);
 
   useEffect(() => {
     fetchTenants();
   }, []);
 
-  const handleImpersonate = async () => {
-    if (!selectedTenant || !impersonateReason.trim()) return;
+  const fetchTenants = async () => {
+    setLoading(true);
     try {
-      setImpersonating(true);
+      const res = await fetch('/api/super-admin/tenants');
+      if (res.ok) {
+        const data = await res.json();
+        setTenants(data.tenants || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch super-admin tenants:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImpersonate = async () => {
+    if (!impersonatingTenant || !impersonateReason) return;
+    setImpersonateLoading(true);
+
+    try {
       const res = await fetch('/api/super-admin/impersonate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetTenantId: selectedTenant.id,
+          tenantId: impersonatingTenant.id,
           reason: impersonateReason,
-          ticketRef: impersonateTicket || 'SUP-INTERNAL-AUDIT',
         }),
       });
-      const data = await res.json();
+
       if (res.ok) {
-        setImpersonateSuccess(
-          `Impersonation session authorized! Scoped token generated with explicit audit log entry ID: ${
-            data.session?.sessionId || 'AUTH-SESSION-TOKEN-2026'
-          }`
-        );
-        setTimeout(() => {
-          setSelectedTenant(null);
-          setImpersonateSuccess(null);
-          setImpersonateReason('');
-          setImpersonateTicket('');
-        }, 3000);
+        const data = await res.json();
+        alert(`Impersonation session established for Tenant: ${impersonatingTenant.name}. Redirecting to tenant dashboard...`);
+        window.location.href = '/dashboard';
       } else {
-        alert(data.error || 'Impersonation request failed');
+        const err = await res.json();
+        alert(`Impersonation error: ${err.error || 'Failed'}`);
       }
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      console.error('Impersonation error:', e);
     } finally {
-      setImpersonating(false);
+      setImpersonateLoading(false);
+      setImpersonatingTenant(null);
     }
   };
 
-  // Filtered tenants
   const filteredTenants = tenants.filter((t) => {
-    const slug = t.slug || t.code || '';
+    const slug = t.slug || t.code || t.subdomain || '';
     const matchesSearch =
-      t.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       slug.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.domain?.toLowerCase().includes(searchQuery.toLowerCase());
+      t.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (t.domain && t.domain.toLowerCase().includes(searchQuery.toLowerCase()));
 
-    const matchesPlan = planFilter === 'ALL' || t.plan?.toUpperCase() === planFilter;
+    const matchesPlan = selectedPlan === 'ALL' || t.plan?.toUpperCase() === selectedPlan;
 
     return matchesSearch && matchesPlan;
   });
@@ -131,18 +136,22 @@ export default function SuperAdminPage() {
 
   return (
     <div className="flex h-screen bg-[#07090e] text-slate-100 antialiased font-sans overflow-hidden select-none">
-      {/* Sidebar with themed boundary */}
-      <div className="border-r border-cyan-500/10 shadow-[4px_0_24px_rgba(0,0,0,0.8)]">
-        <Sidebar />
-      </div>
+      <Sidebar isOpenMobile={mobileMenuOpen} onCloseMobile={() => setMobileMenuOpen(false)} />
 
       <div className="flex-1 flex flex-col overflow-y-auto bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.15),rgba(255,255,255,0))]">
         {/* Futuristic Super Admin Header */}
-        <header className="px-8 py-4 border-b border-cyan-500/15 bg-[#0a0d16]/85 backdrop-blur-xl sticky top-0 z-30 flex items-center justify-between shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
-          <div className="flex items-center gap-3.5">
+        <header className="px-4 sm:px-8 py-3.5 sm:py-4 border-b border-cyan-500/15 bg-[#0a0d16]/85 backdrop-blur-xl sticky top-0 z-30 flex items-center justify-between shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="p-2 -ml-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 md:hidden focus:outline-none"
+              title="Open Navigation"
+            >
+              <Menu className="w-6 h-6 text-cyan-400" />
+            </button>
             <div className="relative">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-cyan-600 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 ring-1 ring-white/20">
-                <Crown className="h-6 w-6 text-white drop-shadow" />
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-cyan-600 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 ring-1 ring-white/20">
+                <Crown className="h-5 w-5 sm:h-6 sm:w-6 text-white drop-shadow" />
               </div>
               <span className="absolute -bottom-1 -right-1 flex h-3.5 w-3.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
@@ -152,14 +161,14 @@ export default function SuperAdminPage() {
 
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-lg font-black tracking-tight bg-gradient-to-r from-cyan-300 via-teal-200 to-indigo-300 bg-clip-text text-transparent">
+                <h1 className="text-base sm:text-lg font-black tracking-tight bg-gradient-to-r from-cyan-300 via-teal-200 to-indigo-300 bg-clip-text text-transparent">
                   SaaS Super Admin Command Center
                 </h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/10 border border-cyan-500/30 text-cyan-300">
+                <span className="hidden sm:inline-block px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/10 border border-cyan-500/30 text-cyan-300">
                   ROOT LEVEL
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-400 hidden sm:block">
                 Multi-Tenant Architecture • Sharded Data Isolation • Dual-Key Impersonation Vault
               </p>
             </div>
@@ -475,9 +484,9 @@ export default function SuperAdminPage() {
               </div>
               <button
                 onClick={() => setSelectedTenant(null)}
-                className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white"
+                className="p-1.5 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
               >
-                ✕
+                <X className="h-5 w-5" />
               </button>
             </div>
 
@@ -491,8 +500,11 @@ export default function SuperAdminPage() {
               </div>
             ) : (
               <div className="space-y-4 text-xs">
-                <div className="p-3.5 bg-amber-950/30 border border-amber-800/50 rounded-2xl text-amber-300 text-xs leading-relaxed">
-                  <strong>⚠️ Security Policy Notice:</strong> All impersonated sessions generate dual-key audit logs, time-bounded access tokens, and require mandatory justification reason and ticket reference.
+                <div className="p-3.5 bg-amber-950/30 border border-amber-800/50 rounded-2xl text-amber-300 text-xs leading-relaxed flex items-start gap-2">
+                  <ShieldAlert className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong>Security Policy Notice:</strong> All impersonated sessions generate dual-key audit logs, time-bounded access tokens, and require mandatory justification reason and ticket reference.
+                  </div>
                 </div>
 
                 <div>

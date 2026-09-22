@@ -36,6 +36,11 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
+    let resumeText = body.resumeText || '';
+    if (body.resumeFileName) {
+      resumeText = `[Attached File: ${body.resumeFileName}]\n${resumeText}`;
+    }
+
     const candidate = await applyCandidate({
       tenantId: user.tenantId,
       jobRequisitionId: body.jobRequisitionId,
@@ -47,7 +52,9 @@ export async function POST(req: NextRequest) {
       currentCtc: body.currentCtc ? parseFloat(body.currentCtc) : undefined,
       expectedCtc: body.expectedCtc ? parseFloat(body.expectedCtc) : undefined,
       noticePeriodDays: body.noticePeriodDays ? parseInt(body.noticePeriodDays) : 30,
-      resumeText: body.resumeText,
+      resumeText,
+      resumeFileName: body.resumeFileName,
+      resumeDataUrl: body.resumeDataUrl,
       skills: body.skills,
     });
 

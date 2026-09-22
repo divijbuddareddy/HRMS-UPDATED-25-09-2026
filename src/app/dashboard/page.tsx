@@ -95,13 +95,13 @@ export default function DashboardPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        setPunchMessage(`✅ ${data.message}`);
+        setPunchMessage(data.message);
         await loadData();
       } else {
-        setPunchMessage(`❌ ${data.error}`);
+        setPunchMessage(data.error);
       }
     } catch (err: any) {
-      setPunchMessage(`❌ ${err.message}`);
+      setPunchMessage(err.message);
     } finally {
       setPunching(false);
     }

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
+import { X, Check, FileText, Receipt, Plus, CheckCircle2, Menu } from "lucide-react";
 
 interface ExpenseClaim {
   id: string;
@@ -33,6 +34,7 @@ export default function ExpensesPage() {
   const [loading, setLoading] = useState(true);
   const [selectedClaim, setSelectedClaim] = useState<ExpenseClaim | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"ALL" | "PENDING_MANAGER" | "PENDING_FINANCE" | "APPROVED">("ALL");
 
   // New claim form state
@@ -42,62 +44,35 @@ export default function ExpensesPage() {
     expenseDate: new Date().toISOString().split("T")[0],
     description: "",
     merchantName: "",
-    receiptUrl: "https://placehold.co/600x400/png?text=Receipt+Proof",
+    receiptUrl: "",
   });
-
-  const fetchExpenses = async () => {
-    try {
-      setLoading(true);
-      const [resClaims, resCats] = await Promise.all([
-        fetch("/api/expenses/claims"),
-        fetch("/api/expenses/categories"),
-      ]);
-      const claimsData = await resClaims.json();
-      const catsData = await resCats.json();
-
-      if (claimsData.claims) setClaims(claimsData.claims);
-      if (catsData.categories) setCategories(catsData.categories);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
     fetchExpenses();
   }, []);
 
-  const handleApprove = async (claimId: string, action: "MANAGER_APPROVE" | "FINANCE_APPROVE" | "REJECT") => {
+  const fetchExpenses = async () => {
     try {
-      const res = await fetch(`/api/expenses/claims/${claimId}/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, remarks: `Processed as ${action}` }),
-      });
+      const res = await fetch("/api/expenses");
       if (res.ok) {
-        await fetchExpenses();
-        setSelectedClaim(null);
+        const data = await res.json();
+        setClaims(data.claims || []);
+        setCategories(data.categories || []);
       }
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error("Error fetching expenses:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleCreateClaim = async (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch("/api/expenses/claims", {
+      const res = await fetch("/api/expenses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          categoryId: formData.categoryId || categories[0]?.id,
-          amount: parseFloat(formData.amount),
-          expenseDate: formData.expenseDate,
-          description: formData.description,
-          merchantName: formData.merchantName,
-          receiptUrl: formData.receiptUrl,
-        }),
+        body: JSON.stringify(formData),
       });
       if (res.ok) {
         setShowNewModal(false);
@@ -107,12 +82,47 @@ export default function ExpensesPage() {
           expenseDate: new Date().toISOString().split("T")[0],
           description: "",
           merchantName: "",
-          receiptUrl: "https://placehold.co/600x400/png?text=Receipt+Proof",
+          receiptUrl: "",
         });
-        await fetchExpenses();
+        fetchExpenses();
+      } else {
+        const error = await res.json();
+        alert(error.error || "Failed to create claim");
       }
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error("Error creating claim:", err);
+    }
+  };
+
+  const handleApprove = async (claimId: string, level: "MANAGER" | "FINANCE") => {
+    try {
+      const res = await fetch(`/api/expenses/${claimId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ level, status: "APPROVED" }),
+      });
+      if (res.ok) {
+        setSelectedClaim(null);
+        fetchExpenses();
+      }
+    } catch (err) {
+      console.error("Approval error:", err);
+    }
+  };
+
+  const handleReject = async (claimId: string, level: "MANAGER" | "FINANCE", reason: string) => {
+    try {
+      const res = await fetch(`/api/expenses/${claimId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ level, status: "REJECTED", reason }),
+      });
+      if (res.ok) {
+        setSelectedClaim(null);
+        fetchExpenses();
+      }
+    } catch (err) {
+      console.error("Rejection error:", err);
     }
   };
 
@@ -129,27 +139,36 @@ export default function ExpensesPage() {
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 antialiased font-sans overflow-hidden">
-      <Sidebar />
+      <Sidebar isOpenMobile={mobileMenuOpen} onCloseMobile={() => setMobileMenuOpen(false)} />
       <div className="flex-1 flex flex-col overflow-y-auto">
         {/* Top Header */}
-        <header className="px-8 py-5 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400">
-              Expenses & Travel Reimbursements
-            </h1>
-            <p className="text-xs text-slate-400 mt-1">
-              Multi-tier approval workflow (Manager → Finance), policy limits, receipt verification & F&F link
-            </p>
+        <header className="px-4 sm:px-8 py-4 sm:py-5 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="p-2 -ml-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 md:hidden focus:outline-none"
+              title="Open Navigation"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+            <div>
+              <h1 className="text-lg sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400">
+                Expenses & Travel Reimbursements
+              </h1>
+              <p className="text-xs text-slate-400 mt-1 hidden sm:block">
+                Multi-tier approval workflow (Manager → Finance), policy limits, receipt verification & F&F link
+              </p>
+            </div>
           </div>
           <button
             onClick={() => setShowNewModal(true)}
-            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium rounded-xl shadow-lg shadow-blue-500/20 text-sm transition-all duration-150 flex items-center gap-2"
+            className="px-3 sm:px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium rounded-xl shadow-lg shadow-blue-500/20 text-xs sm:text-sm transition-all duration-150 flex items-center gap-1.5 sm:gap-2 shrink-0"
           >
-            <span>+ Submit Expense Claim</span>
+            <span>+ Submit Claim</span>
           </button>
         </header>
 
-        <div className="p-8 space-y-6">
+        <div className="p-4 sm:p-8 space-y-6">
           {/* Summary KPIs */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
             <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
@@ -327,9 +346,9 @@ export default function ExpensesPage() {
               </div>
               <button
                 onClick={() => setSelectedClaim(null)}
-                className="text-slate-400 hover:text-slate-200 text-lg font-bold"
+                className="p-1.5 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
               >
-                ✕
+                <X className="h-5 w-5" />
               </button>
             </div>
 
@@ -363,9 +382,9 @@ export default function ExpensesPage() {
                     href={selectedClaim.receipt_url || "#"}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-blue-400 hover:underline text-xs"
+                    className="text-blue-400 hover:underline text-xs inline-flex items-center gap-1.5"
                   >
-                    📄 View Attached Receipt Proof (Verified SHA-256)
+                    <FileText className="h-4 w-4" /> View Attached Receipt Proof (Verified SHA-256)
                   </a>
                 </div>
               </div>
@@ -376,17 +395,17 @@ export default function ExpensesPage() {
               {selectedClaim.manager_approval === "PENDING" && (
                 <button
                   onClick={() => handleApprove(selectedClaim.id, "MANAGER_APPROVE")}
-                  className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md shadow-indigo-500/20"
+                  className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md shadow-indigo-500/20 flex items-center justify-center gap-1.5"
                 >
-                  ✓ Manager Approve (L1)
+                  <Check className="h-4 w-4" /> Manager Approve (L1)
                 </button>
               )}
               {selectedClaim.manager_approval === "APPROVED" && selectedClaim.finance_approval === "PENDING" && (
                 <button
                   onClick={() => handleApprove(selectedClaim.id, "FINANCE_APPROVE")}
-                  className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md shadow-emerald-500/20"
+                  className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5"
                 >
-                  ✓ Finance Final Approve (L2)
+                  <Check className="h-4 w-4" /> Finance Final Approve (L2)
                 </button>
               )}
               <button
@@ -412,9 +431,9 @@ export default function ExpensesPage() {
               <button
                 type="button"
                 onClick={() => setShowNewModal(false)}
-                className="text-slate-400 hover:text-slate-200 text-lg font-bold"
+                className="p-1.5 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
               >
-                ✕
+                <X className="h-5 w-5" />
               </button>
             </div>
 

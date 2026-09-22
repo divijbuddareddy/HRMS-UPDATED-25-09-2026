@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Sidebar from "@/components/Sidebar";
+import { Sparkles, HelpCircle, Bot, User, Send, Shield, Menu } from "lucide-react";
 
 interface ChatMessage {
   id: string;
@@ -16,12 +17,13 @@ export default function AICopilotPage() {
     {
       id: "1",
       sender: "AI",
-      text: "👋 Hello! I am your AI Copilot for AI Automation Labs HRMS. I have secure, RBAC-guarded access to your organization's policies, leave balances, salary structures, tax calculators, and HR metrics. How can I assist you today?",
+      text: "Hello! I am your AI Copilot for AI Automation Labs HRMS. I have secure, RBAC-guarded access to your organization's policies, leave balances, salary structures, tax calculators, and HR metrics. How can I assist you today?",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const samplePrompts = [
     "What is my remaining Casual and Paid Leave balance?",
@@ -77,25 +79,37 @@ export default function AICopilotPage() {
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 antialiased font-sans overflow-hidden">
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <Sidebar
+        isOpenMobile={mobileMenuOpen}
+        onCloseMobile={() => setMobileMenuOpen(false)}
+      />
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Header */}
-        <header className="px-8 py-5 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20 flex items-center justify-between">
+        <header className="px-4 sm:px-8 py-3 sm:py-5 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-blue-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-              <span className="text-xl">✨</span>
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              className="md:hidden p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              aria-label="Open Navigation"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-blue-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
+              <Sparkles className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 via-indigo-300 to-blue-400">
+              <h1 className="text-base sm:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 via-indigo-300 to-blue-400 truncate">
                 AI Copilot & Policy Assistant
               </h1>
-              <p className="text-xs text-slate-400">
+              <p className="text-[10px] sm:text-xs text-slate-400 hidden sm:block">
                 Ground truth HRMS intelligence with strict tenant-isolation and role-based data boundary
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="px-3 py-1 rounded-xl bg-purple-950/60 border border-purple-800/60 text-purple-300 text-xs font-semibold">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-purple-950/60 border border-purple-800/60 text-purple-300 text-xs font-semibold">
+              <Shield className="h-3.5 w-3.5" />
               RBAC Guard Active
             </span>
           </div>
@@ -117,7 +131,7 @@ export default function AICopilotPage() {
                     : "bg-gradient-to-tr from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-500/20"
                 }`}
               >
-                {msg.sender === "USER" ? "U" : "✨"}
+                {msg.sender === "USER" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
               </div>
               <div
                 className={`p-4 rounded-2xl text-xs space-y-2 leading-relaxed ${
@@ -141,7 +155,7 @@ export default function AICopilotPage() {
           {loading && (
             <div className="flex gap-3 max-w-3xl mr-auto">
               <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center text-xs font-bold animate-pulse">
-                ✨
+                <Sparkles className="h-4 w-4" />
               </div>
               <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-slate-400 text-xs rounded-tl-none flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce"></span>
@@ -159,9 +173,10 @@ export default function AICopilotPage() {
             <button
               key={i}
               onClick={() => handleSend(prompt)}
-              className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-slate-200 text-xs font-medium whitespace-nowrap transition"
+              className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-slate-200 text-xs font-medium whitespace-nowrap transition flex items-center gap-1.5"
             >
-              💡 {prompt}
+              <HelpCircle className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+              <span>{prompt}</span>
             </button>
           ))}
         </div>
@@ -185,9 +200,10 @@ export default function AICopilotPage() {
             <button
               type="submit"
               disabled={loading || !input.trim()}
-              className="px-6 py-3.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 disabled:opacity-50 text-white font-semibold rounded-2xl text-xs shadow-lg shadow-indigo-500/25 transition-all"
+              className="px-6 py-3.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 disabled:opacity-50 text-white font-semibold rounded-2xl text-xs shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-1.5"
             >
-              Send Query
+              <Send className="h-3.5 w-3.5" />
+              <span>Send Query</span>
             </button>
           </form>
         </div>

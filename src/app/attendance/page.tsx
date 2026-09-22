@@ -233,13 +233,13 @@ export default function AttendancePage() {
       });
       const data = await res.json();
       if (res.ok) {
-        setPunchMsg({ type: 'success', text: `✅ ${data.message}` });
+        setPunchMsg({ type: 'success', text: data.message });
         await fetchAttendance();
       } else {
-        setPunchMsg({ type: 'error', text: `❌ ${data.error}` });
+        setPunchMsg({ type: 'error', text: data.error });
       }
     } catch (e: any) {
-      setPunchMsg({ type: 'error', text: `❌ ${e.message}` });
+      setPunchMsg({ type: 'error', text: e.message });
     } finally {
       setPunching(false);
     }

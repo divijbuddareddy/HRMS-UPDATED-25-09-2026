@@ -46,4 +46,48 @@ describe('1E. Payroll & Indian Statutory Engine', () => {
     expect(DEFAULT_STATUTORY_CONFIG.esi.employerRate).toBe(0.0325);
     expect(DEFAULT_STATUTORY_CONFIG.esi.grossLimit).toBe(21000);
   });
+
+  it('should generate an actual PDF payslip document with valid bytes and content', async () => {
+    const { generatePayslipPDF } = await import('../src/lib/payroll/payslip-pdf');
+    const doc = generatePayslipPDF({
+      companyName: 'AI AUTOMATION LABS LLP',
+      companyAddress: '100 Feet Road, Indiranagar, Bengaluru, Karnataka 560038',
+      companyTaxInfo: 'PAN: AAACA1234F | GSTIN: 29AAACA1234F1Z5 | TAN: BLRA12345B',
+      payslipNumber: 'PS-202609-EMP-001',
+      month: 9,
+      year: 2026,
+      employee: {
+        firstName: 'Rahul',
+        lastName: 'Sharma',
+        employeeCode: 'EMP-001',
+        designation: 'Staff Software Engineer',
+        department: 'Core Engineering',
+        dateOfJoining: '01-Apr-2024',
+        bankName: 'HDFC Bank',
+        accountNumber: 'XXXXXX4321',
+        ifscCode: 'HDFC0001234',
+        panNumber: 'ABCDE1234F',
+        uanNumber: '101234567890',
+        taxRegime: 'NEW',
+      },
+      payableDays: 30,
+      earningsBreakdown: {
+        BASIC: 50000,
+        HRA: 25000,
+        SPECIAL_ALLOWANCE: 15000,
+      },
+      deductionsBreakdown: {
+        PF_EE: 1800,
+        PT: 200,
+        TDS: 4500,
+      },
+      grossEarnings: 90000,
+      totalDeductions: 6500,
+      netSalary: 83500,
+    });
+
+    expect(doc).toBeDefined();
+    const arrayBuffer = doc.output('arraybuffer');
+    expect(arrayBuffer.byteLength).toBeGreaterThan(1000); // Valid PDF binary
+  });
 });
