@@ -152,7 +152,7 @@ export default function ExitPage() {
   const openResignModal = (isSelf: boolean) => {
     setIsSelfResignation(isSelf);
     setExitForm({
-      employeeId: isSelf ? user?.employeeId || "" : (employees[0]?.id || ""),
+      employeeId: isSelf ? user?.employee?.id || "" : (employees[0]?.id || ""),
       requestedLwd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
       reasonCategory: "BETTER_OPPORTUNITY",
       reason: "",
@@ -515,7 +515,7 @@ export default function ExitPage() {
                   <input
                     type="text"
                     disabled
-                    value={`${user?.name || "Current User"} (${user?.email})`}
+                    value={`${user?.employee?.displayName || user?.employee?.firstName || user?.email || "Current User"} (${user?.email})`}
                     className="w-full p-2.5 bg-slate-800/60 border border-slate-700 rounded-xl text-slate-400 font-medium"
                   />
                 ) : (

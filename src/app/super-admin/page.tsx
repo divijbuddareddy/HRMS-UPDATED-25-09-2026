@@ -54,23 +54,14 @@ export default function SuperAdminPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [planFilter, setPlanFilter] = useState<'ALL' | 'ENTERPRISE' | 'GROWTH' | 'STANDARD'>('ALL');
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   // Impersonation Modal State
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
   const [impersonateReason, setImpersonateReason] = useState('');
   const [impersonateTicket, setImpersonateTicket] = useState('');
   const [impersonating, setImpersonating] = useState(false);
   const [impersonateSuccess, setImpersonateSuccess] = useState<string | null>(null);
-
-  const fetchTenants = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch('/api/super-admin/tenants');
-      const data = await res.json();
-  const [impersonateLoading, setImpersonateLoading] = useState(false);
-
-  useEffect(() => {
-    fetchTenants();
-  }, []);
 
   const fetchTenants = async () => {
     setLoading(true);
@@ -87,24 +78,29 @@ export default function SuperAdminPage() {
     }
   };
 
+  useEffect(() => {
+    fetchTenants();
+  }, []);
+
   const handleImpersonate = async () => {
-    if (!impersonatingTenant || !impersonateReason) return;
-    setImpersonateLoading(true);
+    if (!selectedTenant || !impersonateReason.trim()) return;
+    setImpersonating(true);
 
     try {
       const res = await fetch('/api/super-admin/impersonate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tenantId: impersonatingTenant.id,
-          reason: impersonateReason,
+          targetTenantId: selectedTenant.id,
+          reason: impersonateTicket ? `[${impersonateTicket}] ${impersonateReason}` : impersonateReason,
         }),
       });
 
       if (res.ok) {
-        const data = await res.json();
-        alert(`Impersonation session established for Tenant: ${impersonatingTenant.name}. Redirecting to tenant dashboard...`);
-        window.location.href = '/dashboard';
+        setImpersonateSuccess(`Authorization granted for ${selectedTenant.name}. Redirecting to tenant workspace...`);
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 1500);
       } else {
         const err = await res.json();
         alert(`Impersonation error: ${err.error || 'Failed'}`);
@@ -112,20 +108,19 @@ export default function SuperAdminPage() {
     } catch (e) {
       console.error('Impersonation error:', e);
     } finally {
-      setImpersonateLoading(false);
-      setImpersonatingTenant(null);
+      setImpersonating(false);
     }
   };
 
   const filteredTenants = tenants.filter((t) => {
-    const slug = t.slug || t.code || t.subdomain || '';
+    const slug = t.slug || t.code || '';
     const matchesSearch =
       t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       slug.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (t.domain && t.domain.toLowerCase().includes(searchQuery.toLowerCase()));
 
-    const matchesPlan = selectedPlan === 'ALL' || t.plan?.toUpperCase() === selectedPlan;
+    const matchesPlan = planFilter === 'ALL' || t.plan?.toUpperCase() === planFilter;
 
     return matchesSearch && matchesPlan;
   });

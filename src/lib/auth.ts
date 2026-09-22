@@ -126,3 +126,6 @@ export async function getAuthenticatedUser(req: NextRequest): Promise<AuthUser |
     legalEntityId: user.employee?.legalEntityId,
   };
 }
+
+export const getAuthUserFromRequest = getAuthenticatedUser;
+

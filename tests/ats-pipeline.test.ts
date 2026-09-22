@@ -120,7 +120,10 @@ describe('ATS Recruitment Pipeline Engine', () => {
         email: 'admin@ai-automation-labs.com',
         tenantId,
         roles: ['HR_ADMIN'],
-        permissions: ['employee:manage', 'ats:manage'],
+        permissions: [
+          { permissionKey: 'employee:manage', dataScope: 'ENTIRE_TENANT', isSensitive: false },
+          { permissionKey: 'ats:manage', dataScope: 'ENTIRE_TENANT', isSensitive: false },
+        ],
       },
     });
 

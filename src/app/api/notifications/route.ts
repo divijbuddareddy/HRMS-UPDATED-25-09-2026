@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
 
       // Pending Exit Requests
       const pendingExits = await prisma.exitRequest.findMany({
-        where: { tenantId: user.tenantId, status: { in: ['SUBMITTED', 'NOTICE_PERIOD', 'CLEARANCE_PENDING'] } },
+        where: { tenantId: user.tenantId, status: { in: ['INITIATED', 'APPROVED', 'CLEARANCE_IN_PROGRESS'] } },
         include: { employee: true },
         take: 5,
       });
@@ -124,7 +124,7 @@ export async function GET(req: NextRequest) {
         alerts.push({
           id: `exit-${ex.id}`,
           title: 'Resignation & Exit Workflow',
-          message: `${ex.employee.displayName || ex.employee.firstName} submitted resignation (LWD: ${new Date(ex.expectedLwd).toLocaleDateString()})`,
+          message: `${ex.employee.displayName || ex.employee.firstName} submitted resignation (LWD: ${new Date(ex.requestedLwd || ex.approvedLwd || ex.createdAt).toLocaleDateString()})`,
           type: 'ALERT',
           category: 'EXIT',
           link: '/exit',

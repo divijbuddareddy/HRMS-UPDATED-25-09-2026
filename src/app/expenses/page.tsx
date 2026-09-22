@@ -394,7 +394,7 @@ export default function ExpensesPage() {
             <div className="flex gap-2 pt-2 border-t border-slate-800">
               {selectedClaim.manager_approval === "PENDING" && (
                 <button
-                  onClick={() => handleApprove(selectedClaim.id, "MANAGER_APPROVE")}
+                  onClick={() => handleApprove(selectedClaim.id, "MANAGER")}
                   className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md shadow-indigo-500/20 flex items-center justify-center gap-1.5"
                 >
                   <Check className="h-4 w-4" /> Manager Approve (L1)
@@ -402,14 +402,14 @@ export default function ExpensesPage() {
               )}
               {selectedClaim.manager_approval === "APPROVED" && selectedClaim.finance_approval === "PENDING" && (
                 <button
-                  onClick={() => handleApprove(selectedClaim.id, "FINANCE_APPROVE")}
+                  onClick={() => handleApprove(selectedClaim.id, "FINANCE")}
                   className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5"
                 >
                   <Check className="h-4 w-4" /> Finance Final Approve (L2)
                 </button>
               )}
               <button
-                onClick={() => handleApprove(selectedClaim.id, "REJECT")}
+                onClick={() => handleReject(selectedClaim.id, selectedClaim.manager_approval === "PENDING" ? "MANAGER" : "FINANCE", "Rejected by approver")}
                 className="px-4 py-2 rounded-xl bg-rose-900/40 hover:bg-rose-900/60 border border-rose-800 text-rose-300 font-semibold text-xs"
               >
                 Reject
@@ -423,7 +423,7 @@ export default function ExpensesPage() {
       {showNewModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <form
-            onSubmit={handleCreateClaim}
+            onSubmit={handleCreate}
             className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-200"
           >
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
