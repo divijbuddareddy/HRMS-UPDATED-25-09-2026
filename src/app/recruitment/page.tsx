@@ -25,7 +25,16 @@ import {
   ExternalLink,
   UploadCloud,
   Check,
+  Mail,
+  Download,
+  Building2,
+  Calendar,
+  DollarSign,
+  CheckCircle2,
+  FileSignature,
+  Eye,
 } from 'lucide-react';
+import { generateOfferLetterPDF } from '@/lib/ats/offer-pdf';
 
 export default function RecruitmentPage() {
   const { user } = useAuth();
@@ -42,6 +51,20 @@ export default function RecruitmentPage() {
   const [loading, setLoading] = useState(true);
 
   const isHRAdmin = user?.roles.some((r) => ['HR_ADMIN', 'COMPANY_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
+
+  // Generate & Send Offer Letter Modal States
+  const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
+  const [offerModalCandidate, setOfferModalCandidate] = useState<any | null>(null);
+  const [sendingOffer, setSendingOffer] = useState(false);
+  const [offerForm, setOfferForm] = useState({
+    offeredCtc: '1800000',
+    joiningDate: '',
+    designation: '',
+    department: '',
+    branchLocation: '',
+    probationMonths: '3',
+    notes: '',
+  });
 
 
   // New Job Opening modal
@@ -415,6 +438,101 @@ export default function RecruitmentPage() {
     }
   };
 
+  const handleOpenOfferModal = (candidate: any) => {
+    const job = jobs.find((j) => j.id === candidate.jobRequisitionId) || candidate.jobRequisition;
+    const defaultCtc = candidate.offer?.offeredCtc || candidate.expectedCtc || job?.minCtc || 1800000;
+    
+    // Default joining date: 15 days in the future (YYYY-MM-DD)
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 15);
+    const defaultJoiningDate = futureDate.toISOString().split('T')[0];
+
+    // Find dept/designation/branch names from org data
+    const desigObj = orgData.designations?.find((d: any) => d.id === job?.designationId);
+    const deptObj = orgData.departments?.find((d: any) => d.id === job?.departmentId);
+    const branchObj = orgData.branchLocations?.find((b: any) => b.id === job?.branchLocationId);
+
+    setOfferForm({
+      offeredCtc: String(defaultCtc),
+      joiningDate: candidate.offer?.joiningDate
+        ? new Date(candidate.offer.joiningDate).toISOString().split('T')[0]
+        : defaultJoiningDate,
+      designation: candidate.offer?.designation || desigObj?.title || job?.title || 'Principal AI Engineer',
+      department: deptObj?.name || 'Engineering & Technology',
+      branchLocation: branchObj?.city ? `${branchObj.name} (${branchObj.city})` : 'Bengaluru Main Campus',
+      probationMonths: '3',
+      notes: 'Standard 3-month performance probation applicable. Comprehensive corporate medical benefits and tech gear provisions included.',
+    });
+
+    setOfferModalCandidate(candidate);
+    setIsOfferModalOpen(true);
+  };
+
+  const handleGenerateAndSendOffer = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!offerModalCandidate) return;
+
+    setSendingOffer(true);
+    try {
+      const res = await fetch(`/api/ats/candidates/${offerModalCandidate.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'ISSUE_OFFER',
+          offeredCtc: offerForm.offeredCtc,
+          joiningDate: offerForm.joiningDate,
+          designation: offerForm.designation,
+          department: offerForm.department,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Success! Official Offer Letter generated and dispatched to ${offerModalCandidate.firstName} ${offerModalCandidate.lastName} (${offerModalCandidate.email}).`);
+        setIsOfferModalOpen(false);
+        await fetchATS();
+        if (selectedCandidate?.id === offerModalCandidate.id) {
+          setSelectedCandidate({
+            ...selectedCandidate,
+            stage: 'OFFERED',
+            offer: data.offer,
+          });
+        }
+      } else {
+        alert(data.error || 'Failed to issue offer letter');
+      }
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setSendingOffer(false);
+    }
+  };
+
+  const handleDownloadOfferPdf = () => {
+    if (!offerModalCandidate) return;
+    try {
+      const doc = generateOfferLetterPDF({
+        candidateName: `${offerModalCandidate.firstName} ${offerModalCandidate.lastName}`,
+        candidateEmail: offerModalCandidate.email,
+        candidatePhone: offerModalCandidate.phone,
+        designation: offerForm.designation,
+        department: offerForm.department,
+        branchLocation: offerForm.branchLocation,
+        offeredCtc: parseFloat(offerForm.offeredCtc) || 1800000,
+        joiningDate: new Date(offerForm.joiningDate || Date.now()).toLocaleDateString('en-US', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+        }),
+        probationMonths: parseInt(offerForm.probationMonths) || 3,
+        companyName: 'AI AUTOMATION LABS',
+      });
+      doc.save(`${offerModalCandidate.firstName}_${offerModalCandidate.lastName}_Offer_Letter.pdf`);
+    } catch (err: any) {
+      alert('Error generating Offer Letter PDF: ' + err.message);
+    }
+  };
+
   const handleSignOffer = async (id: string) => {
     if (!confirm('Accept and sign Offer Letter for this candidate? This will officially add them as an Active Employee in the Employees Tab.')) return;
     try {
@@ -685,19 +803,19 @@ export default function RecruitmentPage() {
                             )}
                           </div>
 
-                          {/* Sign Offer Action for Offered Candidates */}
+                          {/* Generate Offer Letter & Send to Employee Action for Offered Candidates */}
                           {c.stage === 'OFFERED' && (
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleSignOffer(c.id);
+                                handleOpenOfferModal(c);
                               }}
-                              className="w-full mt-1.5 py-1.5 px-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg font-bold text-[11px] shadow-sm shadow-blue-600/20 flex items-center justify-center gap-1.5 transition-all active:scale-95"
-                              title="Sign Offer Letter & Add to Employees Directory"
+                              className="w-full mt-1.5 py-2 px-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg font-bold text-[11px] shadow-sm shadow-blue-600/20 flex items-center justify-center gap-1.5 transition-all active:scale-95 leading-tight"
+                              title="Generate Official Offer Letter & Send to Candidate / Employee"
                             >
-                              <FileText className="h-3.5 w-3.5" />
-                              Sign Offer (Add to Employees)
+                              <Send className="h-3.5 w-3.5 flex-shrink-0" />
+                              <span className="truncate">Generate offer letter and send to employee</span>
                             </button>
                           )}
 
@@ -1361,11 +1479,11 @@ export default function RecruitmentPage() {
                   </button>
                 ) : selectedCandidate.stage === 'OFFERED' ? (
                   <button
-                    onClick={() => handleSignOffer(selectedCandidate.id)}
+                    onClick={() => handleOpenOfferModal(selectedCandidate)}
                     className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 flex items-center gap-1.5 transition-all"
                   >
-                    <FileText className="h-4 w-4" />
-                    Sign Offer & Add to Employees
+                    <Send className="h-4 w-4" />
+                    Generate Offer Letter & Send to Employee
                   </button>
                 ) : (
                   <button
@@ -1553,6 +1671,225 @@ export default function RecruitmentPage() {
                   >
                     Add to Pipeline
                   </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Generate & Send Offer Letter Modal */}
+        {isOfferModalOpen && offerModalCandidate && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+            <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 my-8">
+              {/* Header */}
+              <div className="flex justify-between items-center border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-indigo-500/20">
+                    <FileSignature className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                      Generate & Issue Offer Letter
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        Official Employment Offer
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Configure compensation parameters, preview terms, and dispatch the offer to candidate
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsOfferModalOpen(false)}
+                  className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Candidate Quick Profile Strip */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-sm">
+                    {offerModalCandidate.firstName[0]}{offerModalCandidate.lastName?.[0] || ''}
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-900">
+                      {offerModalCandidate.firstName} {offerModalCandidate.lastName}
+                    </div>
+                    <div className="text-slate-500 flex items-center gap-2 font-mono text-[11px]">
+                      <Mail className="h-3 w-3 text-slate-400" />
+                      {offerModalCandidate.email}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 text-right">
+                  <div>
+                    <div className="text-[10px] text-slate-400 uppercase font-semibold">Expected CTC</div>
+                    <div className="font-bold text-slate-800">
+                      {offerModalCandidate.expectedCtc ? `₹${(offerModalCandidate.expectedCtc / 100000).toFixed(1)} LPA` : 'Not specified'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-400 uppercase font-semibold">Status</div>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">
+                      <Sparkles className="h-2.5 w-2.5" /> Ready for Offer
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Offer Letter Form & Live Preview */}
+              <form onSubmit={handleGenerateAndSendOffer} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1 text-xs flex items-center gap-1">
+                      <Briefcase className="h-3.5 w-3.5 text-indigo-600" /> Job Title / Designation *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={offerForm.designation}
+                      onChange={(e) => setOfferForm({ ...offerForm, designation: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 font-medium"
+                      placeholder="e.g. Principal AI Engineer"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1 text-xs flex items-center gap-1">
+                      <DollarSign className="h-3.5 w-3.5 text-emerald-600" /> Annual Total CTC (INR ₹) *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        required
+                        min="100000"
+                        step="10000"
+                        value={offerForm.offeredCtc}
+                        onChange={(e) => setOfferForm({ ...offerForm, offeredCtc: e.target.value })}
+                        className="w-full p-2.5 pr-20 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 font-bold text-slate-900"
+                      />
+                      <span className="absolute right-3 top-2.5 text-[11px] font-bold text-emerald-600">
+                        ₹{((parseFloat(offerForm.offeredCtc) || 0) / 100000).toFixed(2)} LPA
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1 text-xs flex items-center gap-1">
+                      <Calendar className="h-3.5 w-3.5 text-indigo-600" /> Proposed Date of Joining *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={offerForm.joiningDate}
+                      onChange={(e) => setOfferForm({ ...offerForm, joiningDate: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1 text-xs flex items-center gap-1">
+                      <Building2 className="h-3.5 w-3.5 text-indigo-600" /> Department / Team
+                    </label>
+                    <input
+                      type="text"
+                      value={offerForm.department}
+                      onChange={(e) => setOfferForm({ ...offerForm, department: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 font-medium"
+                      placeholder="e.g. Engineering & Technology"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1 text-xs flex items-center gap-1">
+                      Office / Branch Location
+                    </label>
+                    <input
+                      type="text"
+                      value={offerForm.branchLocation}
+                      onChange={(e) => setOfferForm({ ...offerForm, branchLocation: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500"
+                      placeholder="e.g. Bengaluru Campus (Hybrid)"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-semibold text-slate-700 block mb-1 text-xs">
+                      Probation Period (Months)
+                    </label>
+                    <select
+                      value={offerForm.probationMonths}
+                      onChange={(e) => setOfferForm({ ...offerForm, probationMonths: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="1">1 Month</option>
+                      <option value="3">3 Months (Standard)</option>
+                      <option value="6">6 Months</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Offer Letter Document Preview Box */}
+                <div className="border border-slate-200 rounded-xl bg-gradient-to-b from-slate-50 to-slate-100/60 p-4 text-xs space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <Eye className="h-3.5 w-3.5 text-indigo-600" />
+                      Live Offer Letter Preview
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      Ref: OFFER-{offerModalCandidate.id.slice(-6).toUpperCase()}
+                    </span>
+                  </div>
+
+                  <div className="bg-white p-3.5 rounded-lg border border-slate-200 text-slate-700 space-y-2 text-[11px] leading-relaxed shadow-sm font-sans">
+                    <div className="flex justify-between items-center text-slate-900 border-b border-slate-100 pb-1.5 font-bold">
+                      <span>AI AUTOMATION LABS</span>
+                      <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        CONFIDENTIAL
+                      </span>
+                    </div>
+                    <p>
+                      Dear <strong>{offerModalCandidate.firstName} {offerModalCandidate.lastName}</strong>,
+                    </p>
+                    <p>
+                      We are pleased to offer you the position of <strong className="text-slate-900">{offerForm.designation || 'Software Engineer'}</strong> at AI Automation Labs. Your annual Total Cost to Company (CTC) will be <strong className="text-emerald-700">₹{parseFloat(offerForm.offeredCtc || '0').toLocaleString('en-IN')} (₹{((parseFloat(offerForm.offeredCtc) || 0) / 100000).toFixed(2)} LPA)</strong>, with a proposed joining date of <strong>{offerForm.joiningDate || 'TBD'}</strong>.
+                    </p>
+                    <p className="text-slate-500 text-[10px]">
+                      This offer letter will be electronically recorded in the HRMS Documents Vault with SHA-256 tamper-evident checksum verification upon dispatch.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={handleDownloadOfferPdf}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Download className="h-3.5 w-3.5 text-slate-600" />
+                    Download Offer Letter (PDF)
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsOfferModalOpen(false)}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={sendingOffer}
+                      className="px-5 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/25 flex items-center gap-1.5 transition-all disabled:opacity-50"
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      {sendingOffer ? 'Generating & Sending...' : 'Generate Offer Letter & Send to Employee'}
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
