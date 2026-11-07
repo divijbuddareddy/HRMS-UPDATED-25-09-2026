@@ -27,6 +27,11 @@ import {
   ArrowUpRight,
   Fingerprint,
   Menu,
+  Plus,
+  Copy,
+  Check,
+  Ban,
+  Play,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -63,13 +68,88 @@ export default function SuperAdminPage() {
   const [impersonating, setImpersonating] = useState(false);
   const [impersonateSuccess, setImpersonateSuccess] = useState<string | null>(null);
 
+  // Company management state
+  const [currentTenantId, setCurrentTenantId] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [busyTenantId, setBusyTenantId] = useState<string | null>(null);
+  const [newCompany, setNewCompany] = useState({ name: '', slug: '', plan: 'STANDARD', domain: '', adminEmail: '' });
+  const [createdCompany, setCreatedCompany] = useState<{ name: string; slug: string; email: string; password: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const slugify = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+
+  const handleCreateCompany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreating(true);
+    try {
+      const res = await fetch('/api/super-admin/tenants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCompany),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        alert(d.error || 'Failed to create company');
+        return;
+      }
+      setIsAddOpen(false);
+      setCopied(false);
+      setCreatedCompany({ name: d.tenant.name, slug: d.tenant.slug, email: d.admin.email, password: d.tempPassword });
+      setNewCompany({ name: '', slug: '', plan: 'STANDARD', domain: '', adminEmail: '' });
+      await fetchTenants();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleSetStatus = async (tenant: Tenant, status: 'ACTIVE' | 'SUSPENDED') => {
+    const msg =
+      status === 'SUSPENDED'
+        ? `Suspend ${tenant.name}? All of its users will be signed out and unable to sign in until re-activated.`
+        : `Re-activate ${tenant.name}? Its users will be able to sign in again.`;
+    if (!confirm(msg)) return;
+    setBusyTenantId(tenant.id);
+    try {
+      const res = await fetch('/api/super-admin/tenants', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantId: tenant.id, status }),
+      });
+      const d = await res.json();
+      if (!res.ok) alert(d.error || 'Failed to update company');
+      await fetchTenants();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setBusyTenantId(null);
+    }
+  };
+
+  const copyCompanyCredentials = async () => {
+    if (!createdCompany) return;
+    const text = `HRMS admin login for ${createdCompany.name}\nLink: ${window.location.origin}/login\nCompany ID: ${createdCompany.slug}\nEmail: ${createdCompany.email}\nTemporary password: ${createdCompany.password}\nYou will be asked to set your own password after signing in.`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      alert(text);
+    }
+  };
+
   const fetchTenants = async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/super-admin/tenants');
+      if (res.status === 403) setForbidden(true);
       if (res.ok) {
         const data = await res.json();
         setTenants(data.tenants || []);
+        setCurrentTenantId(data.currentTenantId || null);
       }
     } catch (err) {
       console.error('Failed to fetch super-admin tenants:', err);
@@ -176,6 +256,16 @@ export default function SuperAdminPage() {
               <span className="text-slate-400">Global Cluster:</span>
               <span className="text-emerald-400 font-bold">100% HEALTHY</span>
             </div>
+
+            {!forbidden && (
+              <button
+                onClick={() => setIsAddOpen(true)}
+                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-cyan-900/40"
+              >
+                <Plus className="h-4 w-4" />
+                Add Company
+              </button>
+            )}
 
             <button
               onClick={fetchTenants}
@@ -356,7 +446,7 @@ export default function SuperAdminPage() {
                     <th className="px-6 py-4">Users / Headcount</th>
                     <th className="px-6 py-4">Status</th>
                     <th className="px-6 py-4">Created Date</th>
-                    <th className="px-6 py-4 text-right">Support Action</th>
+                    <th className="px-6 py-4 text-right">Access</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 text-slate-300">
@@ -422,7 +512,7 @@ export default function SuperAdminPage() {
 
                           <td className="px-6 py-4">
                             <div className="font-mono font-bold text-slate-200">
-                              {tenant._count?.users || 1} <span className="text-slate-500 font-normal">users</span>
+                              {tenant._count?.users ?? 0} <span className="text-slate-500 font-normal">users</span>
                             </div>
                             <div className="text-[11px] text-slate-400 font-mono">
                               {tenant._count?.employees || 0} employees
@@ -430,10 +520,17 @@ export default function SuperAdminPage() {
                           </td>
 
                           <td className="px-6 py-4">
-                            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold tracking-wider uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 inline-flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                              {tenant.status || 'ACTIVE'}
-                            </span>
+                            {tenant.status === 'SUSPENDED' ? (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold tracking-wider uppercase bg-rose-500/10 text-rose-400 border border-rose-500/30 inline-flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                                SUSPENDED
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold tracking-wider uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 inline-flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                {tenant.status || 'ACTIVE'}
+                              </span>
+                            )}
                           </td>
 
                           <td className="px-6 py-4 text-slate-400 font-mono text-[11px]">
@@ -441,13 +538,27 @@ export default function SuperAdminPage() {
                           </td>
 
                           <td className="px-6 py-4 text-right">
-                            <button
-                              onClick={() => setSelectedTenant(tenant)}
-                              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 via-orange-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-bold text-xs shadow-md shadow-orange-950/50 transition-all active:scale-95 flex items-center gap-1.5 ml-auto"
-                            >
-                              <Key className="h-3.5 w-3.5" />
-                              Impersonate
-                            </button>
+                            {tenant.id === currentTenantId ? (
+                              <span className="text-[11px] font-mono text-slate-500">Your company</span>
+                            ) : tenant.status === 'SUSPENDED' ? (
+                              <button
+                                disabled={busyTenantId === tenant.id}
+                                onClick={() => handleSetStatus(tenant, 'ACTIVE')}
+                                className="px-3.5 py-1.5 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs inline-flex items-center gap-1.5"
+                              >
+                                <Play className="h-3.5 w-3.5" />
+                                Activate
+                              </button>
+                            ) : (
+                              <button
+                                disabled={busyTenantId === tenant.id}
+                                onClick={() => handleSetStatus(tenant, 'SUSPENDED')}
+                                className="px-3.5 py-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 disabled:opacity-50 text-white font-bold text-xs inline-flex items-center gap-1.5"
+                              >
+                                <Ban className="h-3.5 w-3.5" />
+                                Suspend
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -459,6 +570,142 @@ export default function SuperAdminPage() {
           </div>
         </div>
       </div>
+
+      {/* Add Company Modal */}
+      {isAddOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <form
+            onSubmit={handleCreateCompany}
+            className="bg-[#0e1322] border border-cyan-500/40 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 text-xs select-text my-8"
+          >
+            <div className="flex justify-between items-start border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+                  <Building className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Add a new company</h3>
+                  <p className="text-slate-400">Creates the company with standard setup and its first Company Admin login.</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setIsAddOpen(false)} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Company name *</label>
+                <input
+                  required
+                  value={newCompany.name}
+                  onChange={(e) => {
+                    const name = e.target.value;
+                    setNewCompany((c) => ({ ...c, name, slug: c.slug && c.slug !== slugify(c.name) ? c.slug : slugify(name) }));
+                  }}
+                  placeholder="e.g. Acme Technologies Pvt Ltd"
+                  className="w-full px-3 py-2 bg-[#121829] border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Company ID (used to sign in) *</label>
+                <input
+                  required
+                  value={newCompany.slug}
+                  onChange={(e) => setNewCompany({ ...newCompany, slug: slugify(e.target.value) })}
+                  placeholder="e.g. acme-tech"
+                  className="w-full px-3 py-2 bg-[#121829] border border-slate-700 rounded-xl text-cyan-300 font-mono focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">Lowercase letters, numbers and hyphens. Cannot be changed later.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Plan</label>
+                  <select
+                    value={newCompany.plan}
+                    onChange={(e) => setNewCompany({ ...newCompany, plan: e.target.value })}
+                    className="w-full px-3 py-2 bg-[#121829] border border-slate-700 rounded-xl text-slate-100"
+                  >
+                    <option value="STANDARD">Standard</option>
+                    <option value="GROWTH">Growth</option>
+                    <option value="ENTERPRISE">Enterprise</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Website domain</label>
+                  <input
+                    value={newCompany.domain}
+                    onChange={(e) => setNewCompany({ ...newCompany, domain: e.target.value })}
+                    placeholder="acme.com (optional)"
+                    className="w-full px-3 py-2 bg-[#121829] border border-slate-700 rounded-xl text-slate-100"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Company Admin email *</label>
+                <input
+                  required
+                  type="email"
+                  value={newCompany.adminEmail}
+                  onChange={(e) => setNewCompany({ ...newCompany, adminEmail: e.target.value })}
+                  placeholder="hr.head@acme.com"
+                  className="w-full px-3 py-2 bg-[#121829] border border-slate-700 rounded-xl text-slate-100"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">This person manages the company&apos;s employees and their logins.</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setIsAddOpen(false)} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-semibold">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={creating}
+                className="px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 disabled:opacity-60 text-white font-bold"
+              >
+                {creating ? 'Creating…' : 'Create company'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* New company admin credentials (shown once) */}
+      {createdCompany && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0e1322] border border-emerald-500/40 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 text-xs select-text">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                <CheckCircle2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">{createdCompany.name} is ready</h3>
+                <p className="text-slate-400">Send these details privately to the company admin.</p>
+              </div>
+            </div>
+            <div className="p-4 rounded-2xl bg-[#121829] border border-slate-700 font-mono text-[12px] space-y-1.5 text-slate-200">
+              <div><span className="text-slate-500">Link:</span> {typeof window !== 'undefined' ? `${window.location.origin}/login` : '/login'}</div>
+              <div><span className="text-slate-500">Company ID:</span> <span className="text-cyan-300">{createdCompany.slug}</span></div>
+              <div><span className="text-slate-500">Email:</span> {createdCompany.email}</div>
+              <div><span className="text-slate-500">Temporary password:</span> <span className="font-bold text-white">{createdCompany.password}</span></div>
+            </div>
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>This password is shown only once. The admin must set their own password at first sign-in.</span>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={copyCompanyCredentials} className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold inline-flex items-center gap-1.5">
+                {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? 'Copied' : 'Copy details'}
+              </button>
+              <button onClick={() => setCreatedCompany(null)} className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Cyber Impersonation Authorization Modal */}
       {selectedTenant && (

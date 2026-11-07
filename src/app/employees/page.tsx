@@ -392,7 +392,7 @@ export default function EmployeesPage() {
 
   const copyCredentials = async () => {
     if (!credentials) return;
-    const text = `HRMS login\nLink: ${window.location.origin}/login\nTenant: ${user?.tenantSlug || ''}\nEmail: ${credentials.email}\nTemporary password: ${credentials.password}\nYou will be asked to set your own password after signing in.`;
+    const text = `HRMS login\nLink: ${window.location.origin}/login\nCompany ID: ${user?.tenantSlug || ''}\nEmail: ${credentials.email}\nTemporary password: ${credentials.password}\nYou will be asked to set your own password after signing in.`;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -1545,7 +1545,7 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
 
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5 font-mono text-[12px]">
                 <div><span className="text-slate-500">Link:</span> {typeof window !== 'undefined' ? `${window.location.origin}/login` : '/login'}</div>
-                <div><span className="text-slate-500">Tenant:</span> {user?.tenantSlug}</div>
+                <div><span className="text-slate-500">Company ID:</span> {user?.tenantSlug}</div>
                 <div><span className="text-slate-500">Email:</span> {credentials.email}</div>
                 <div><span className="text-slate-500">Temporary password:</span> <span className="font-bold text-slate-900">{credentials.password}</span></div>
               </div>

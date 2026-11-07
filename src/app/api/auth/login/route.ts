@@ -33,7 +33,8 @@ export async function POST(req: NextRequest) {
       tenantId = tenant.id;
     }
 
-    const user = await prisma.user.findFirst({
+    const candidates = await prisma.user.findMany({
+      take: 2,
       where: {
         email: email.toLowerCase().trim(),
         ...(tenantId ? { tenantId } : {}),
@@ -52,6 +53,14 @@ export async function POST(req: NextRequest) {
         employee: true,
       },
     });
+
+    if (candidates.length > 1) {
+      return NextResponse.json(
+        { error: 'This email is registered with more than one company. Please enter your Company ID (tenant slug).' },
+        { status: 400 }
+      );
+    }
+    const user = candidates[0];
 
     if (!user) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
@@ -88,6 +97,14 @@ export async function POST(req: NextRequest) {
       });
 
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    }
+
+    // Block sign-in for suspended companies (checked after the password so it reveals nothing to guessers)
+    if (user.tenant.status === 'SUSPENDED' || user.tenant.status === 'ARCHIVED') {
+      return NextResponse.json(
+        { error: 'Access for your company is currently suspended. Please contact your service provider.' },
+        { status: 403 }
+      );
     }
 
     // Reset rate limit on success

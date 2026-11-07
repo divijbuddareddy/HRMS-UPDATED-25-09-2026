@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {
   Sparkles,
@@ -14,17 +14,30 @@ export default function LoginPage() {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [tenantSlug, setTenantSlug] = useState('ai-automation-labs');
+  const [tenantSlug, setTenantSlug] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Remember the last Company ID used on this device (convenience only)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('hrms_company_id');
+      if (saved) setTenantSlug(saved);
+    } catch {}
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const res = await login(email, password, tenantSlug);
+    const slug = tenantSlug.trim().toLowerCase();
+    const res = await login(email, password, slug || undefined);
     if (!res.success) {
       setError(res.error || 'Authentication failed');
+    } else {
+      try {
+        if (slug) localStorage.setItem('hrms_company_id', slug);
+      } catch {}
     }
     setLoading(false);
   };
@@ -54,16 +67,18 @@ export default function LoginPage() {
             )}
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Tenant Slug</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Company ID <span className="font-normal text-slate-400">(optional)</span>
+              </label>
               <div className="relative">
                 <Building className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                 <input
                   type="text"
-                  required
+                  autoCapitalize="none"
                   value={tenantSlug}
                   onChange={(e) => setTenantSlug(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  placeholder="ai-automation-labs"
+                  placeholder="e.g. acme-corp"
                 />
               </div>
             </div>

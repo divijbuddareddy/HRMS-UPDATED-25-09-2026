@@ -69,11 +69,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ...(isHR || isFinance || isCompanyAdmin
       ? [{ label: 'Audit Trail', href: '/audit', icon: History }]
       : []),
-    ...(isCompanyAdmin
-      ? [
-          { label: 'AI Configuration', href: '/settings/ai', icon: Key },
-          { label: 'Super Admin', href: '/super-admin', icon: Crown },
-        ]
+    ...(isCompanyAdmin ? [{ label: 'AI Configuration', href: '/settings/ai', icon: Key }] : []),
+    ...(user?.roles.includes('PLATFORM_SUPER_ADMIN')
+      ? [{ label: 'Companies (Super Admin)', href: '/super-admin', icon: Crown }]
       : []),
   ];
 
