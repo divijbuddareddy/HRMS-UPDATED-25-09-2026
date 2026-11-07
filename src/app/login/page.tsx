@@ -8,17 +8,12 @@ import {
   Mail,
   Building,
   ArrowRight,
-  ShieldCheck,
-  Crown,
-  ClipboardList,
-  Briefcase,
-  User,
 } from 'lucide-react';
 
 export default function LoginPage() {
   const { login } = useAuth();
-  const [email, setEmail] = useState('admin@aiautomationlabs.com');
-  const [password, setPassword] = useState('Password@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [tenantSlug, setTenantSlug] = useState('ai-automation-labs');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -34,11 +29,6 @@ export default function LoginPage() {
     setLoading(false);
   };
 
-  const quickLogin = (demoEmail: string) => {
-    setEmail(demoEmail);
-    setPassword('Password@123');
-    setTenantSlug('ai-automation-labs');
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 flex items-center justify-center p-4">
@@ -88,7 +78,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  placeholder="you@aiautomationlabs.com"
+                  placeholder="you@automationlabs.online"
                 />
               </div>
             </div>
@@ -123,48 +113,6 @@ export default function LoginPage() {
               )}
             </button>
           </form>
-
-          {/* Quick Demo Logins */}
-          <div className="mt-6 pt-5 border-t border-slate-200">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-              Quick Demo Accounts (Password@123)
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => quickLogin('admin@aiautomationlabs.com')}
-                className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-left border border-slate-200 text-slate-800 font-medium flex items-center gap-2 transition-colors"
-              >
-                <Crown className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                <span>Company Admin</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => quickLogin('hr@aiautomationlabs.com')}
-                className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-left border border-slate-200 text-slate-800 font-medium flex items-center gap-2 transition-colors"
-              >
-                <ClipboardList className="h-3.5 w-3.5 text-sky-600 shrink-0" />
-                <span>HR Admin</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => quickLogin('manager@aiautomationlabs.com')}
-                className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-left border border-slate-200 text-slate-800 font-medium flex items-center gap-2 transition-colors"
-              >
-                <Briefcase className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                <span>Manager</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => quickLogin('emp1@aiautomationlabs.com')}
-                className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-left border border-slate-200 text-slate-800 font-medium flex items-center gap-2 transition-colors"
-              >
-                <User className="h-3.5 w-3.5 text-purple-600 shrink-0" />
-                <span>Employee (Priya)</span>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

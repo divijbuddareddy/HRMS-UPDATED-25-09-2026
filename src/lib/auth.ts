@@ -105,6 +105,13 @@ export async function getAuthenticatedUser(req: NextRequest): Promise<AuthUser |
 
   if (!user) return null;
 
+  // Accounts with a temporary password may only reach the endpoints needed to set a new one.
+  if (user.mustChangePassword) {
+    const path = req.nextUrl?.pathname || '';
+    const allowed = ['/api/auth/me', '/api/auth/change-password', '/api/auth/logout'];
+    if (!allowed.includes(path)) return null;
+  }
+
   const roles = user.userRoles.map((ur) => ur.role.name as RoleName);
   const permissions = user.userRoles.flatMap((ur) =>
     ur.role.permissions.map((p) => ({

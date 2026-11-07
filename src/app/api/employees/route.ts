@@ -60,6 +60,15 @@ export async function GET(req: NextRequest) {
         identity: true,
         bank: true,
         salaryAssignments: { where: { isCurrent: true } },
+        user: {
+          select: {
+            id: true,
+            status: true,
+            lastLoginAt: true,
+            mustChangePassword: true,
+            userRoles: { select: { role: { select: { name: true } } } },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });

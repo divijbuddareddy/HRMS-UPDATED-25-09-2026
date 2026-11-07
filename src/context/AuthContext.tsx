@@ -11,6 +11,7 @@ export interface UserSession {
   tenantSlug: string;
   roles: string[];
   activeRole: string;
+  mustChangePassword?: boolean;
   permissions: {
     permissionKey: string;
     dataScope: string;
@@ -87,7 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: false, error: data.error || 'Login failed' };
       }
       await fetchSession();
-      router.push('/dashboard');
+      router.push(data.user?.mustChangePassword ? '/change-password' : '/dashboard');
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Network error' };
@@ -110,6 +111,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!loading && !user && pathname !== '/login' && !pathname.startsWith('/api/')) {
       router.push('/login');
+    }
+    // Force users holding a temporary password to set their own before using the app
+    if (!loading && user?.mustChangePassword && pathname !== '/change-password') {
+      router.push('/change-password');
     }
   }, [user, loading, pathname, router]);
 

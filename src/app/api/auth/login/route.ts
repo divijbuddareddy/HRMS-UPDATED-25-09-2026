@@ -142,6 +142,7 @@ export async function POST(req: NextRequest) {
         email: user.email,
         tenantId: user.tenantId,
         tenantName: user.tenant.name,
+        mustChangePassword: user.mustChangePassword,
         roles,
         employee: user.employee
           ? {

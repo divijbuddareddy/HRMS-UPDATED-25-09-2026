@@ -45,7 +45,23 @@ export async function POST(req: NextRequest) {
     const { type, data } = body;
 
     let result: any;
-    if (type === 'DEPARTMENT') {
+    if (type === 'LEGAL_ENTITY') {
+      if (!data?.name || !data?.code) {
+        return NextResponse.json({ error: 'Company name and code are required.' }, { status: 400 });
+      }
+      result = await prisma.legalEntity.create({
+        data: {
+          tenantId: user.tenantId,
+          name: String(data.name).trim(),
+          code: String(data.code).trim().toUpperCase(),
+          pan: data.pan ? String(data.pan).trim().toUpperCase() : null,
+          gstin: data.gstin ? String(data.gstin).trim().toUpperCase() : null,
+          cin: data.cin ? String(data.cin).trim() : null,
+          registeredAddress: data.registeredAddress ? String(data.registeredAddress).trim() : null,
+          currency: data.currency || 'INR',
+        },
+      });
+    } else if (type === 'DEPARTMENT') {
       result = await prisma.department.create({
         data: {
           tenantId: user.tenantId,
