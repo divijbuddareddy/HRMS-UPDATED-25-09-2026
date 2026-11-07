@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { hasPermission, sanitizeEmployeeForUser, isAdmin, PERMISSIONS } from '@/lib/rbac';
+import { sanitizeEmployeeForUser } from '@/lib/rbac';
+import { can, canViewEmployee, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
 
 export async function GET(
@@ -36,6 +37,13 @@ export async function GET(
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
     }
 
+    // Own record; HR (company-wide) / manager (direct reports) via team:view; Finance needs the
+    // whole directory for payroll and full-and-final settlement.
+    const allowed = can(user, 'payroll:manage') || (await canViewEmployee(user, id, 'team:view'));
+    if (!allowed) {
+      return forbidden('You can only view your own profile or your team members.');
+    }
+
     const sanitized = sanitizeEmployeeForUser(employee, user);
     return NextResponse.json(sanitized);
   } catch (error: any) {
@@ -52,12 +60,13 @@ export async function PUT(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Only administrators have access to edit employee data
-    if (!isAdmin(user)) {
-      return NextResponse.json(
-        { error: 'Forbidden: Only administrators have access to edit employee records.' },
-        { status: 403 }
-      );
+    // Only HR (employees:manage) or the company owner can edit employee records
+    if (!can(user, 'employees:manage')) {
+      return forbidden('Only HR or the company owner can edit employee records.');
+    }
+    // Nobody edits their own HR record (status, reporting manager, ...) through this endpoint.
+    if (user.employeeId && user.employeeId === id) {
+      return forbidden('You cannot edit your own employee record. Ask another HR administrator.');
     }
 
     const body = await req.json();
@@ -149,12 +158,12 @@ export async function DELETE(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Only administrators have access to delete employee records
-    if (!isAdmin(user)) {
-      return NextResponse.json(
-        { error: 'Forbidden: Only administrators have access to delete employee records.' },
-        { status: 403 }
-      );
+    // Only HR (employees:manage) or the company owner can delete employee records
+    if (!can(user, 'employees:manage')) {
+      return forbidden('Only HR or the company owner can delete employee records.');
+    }
+    if (user.employeeId && user.employeeId === id) {
+      return forbidden('You cannot delete your own employee record.');
     }
 
     const existing = await prisma.employee.findUnique({

@@ -39,7 +39,8 @@ export async function POST(req: NextRequest) {
     }
 
     const job = await prisma.jobRequisition.findUnique({ where: { id: jobRequisitionId } });
-    if (!job) return NextResponse.json({ error: 'Job requisition not found' }, { status: 404 });
+    // Public applications are only accepted for published openings.
+    if (!job || job.status !== 'PUBLISHED') return NextResponse.json({ error: 'Job requisition not found' }, { status: 404 });
 
     // Format resumeText to include attached file metadata if uploaded
     let combinedResumeText = resumeText || '';

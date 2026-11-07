@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { isAdmin } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
 
 export async function GET(
@@ -13,17 +13,19 @@ export async function GET(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+    const isRecruiter = can(user, 'recruitment:manage');
     const job = await prisma.jobRequisition.findUnique({
       where: { id },
       include: {
         department: true,
         designation: true,
         branchLocation: true,
-        candidates: true,
+        candidates: isRecruiter,
       },
     });
 
-    if (!job || job.tenantId !== user.tenantId) {
+    // Non-recruiters may only see published openings, without candidates.
+    if (!job || job.tenantId !== user.tenantId || (!isRecruiter && job.status !== 'PUBLISHED')) {
       return NextResponse.json({ error: 'Job requisition not found' }, { status: 404 });
     }
 
@@ -42,12 +44,9 @@ export async function PUT(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Only administrators can edit job requisitions
-    if (!isAdmin(user)) {
-      return NextResponse.json(
-        { error: 'Forbidden: Only administrators have permission to edit job openings.' },
-        { status: 403 }
-      );
+    // Only recruiters (HR) / owner can edit job openings
+    if (!can(user, 'recruitment:manage')) {
+      return forbidden('Only HR or the company owner can edit job openings.');
     }
 
     const existing = await prisma.jobRequisition.findUnique({ where: { id } });
@@ -96,12 +95,9 @@ export async function DELETE(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Only administrators can delete job openings
-    if (!isAdmin(user)) {
-      return NextResponse.json(
-        { error: 'Forbidden: Only administrators have permission to delete job openings.' },
-        { status: 403 }
-      );
+    // Only recruiters (HR) / owner can delete job openings
+    if (!can(user, 'recruitment:manage')) {
+      return forbidden('Only HR or the company owner can delete job openings.');
     }
 
     const existing = await prisma.jobRequisition.findUnique({ where: { id } });

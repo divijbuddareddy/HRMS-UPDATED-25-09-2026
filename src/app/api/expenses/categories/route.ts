@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { can, forbidden } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
@@ -21,6 +22,10 @@ export async function POST(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    if (!can(user, 'expense:configure')) {
+      return forbidden('Only HR Admin, Finance or the company owner can create expense categories.');
+    }
 
     const body = await req.json();
     const category = await prisma.expenseCategory.create({

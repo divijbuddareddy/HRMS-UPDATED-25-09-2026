@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { hasPermission, PERMISSIONS } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
 import { DEFAULT_STATUTORY_CONFIG } from '@/lib/payroll/engine';
 
@@ -29,8 +29,8 @@ export async function POST(req: NextRequest) {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (!hasPermission(user, PERMISSIONS.STATUTORY_MANAGE)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!can(user, 'payroll:manage')) {
+      return forbidden('Only Finance or the company owner can manage statutory rules.');
     }
 
     const body = await req.json();

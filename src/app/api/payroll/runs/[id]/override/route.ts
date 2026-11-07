@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
 import { overridePayrollComponent } from '@/lib/payroll/engine';
-import { hasPermission, PERMISSIONS } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 
 export async function POST(
   req: NextRequest,
@@ -12,8 +13,8 @@ export async function POST(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (!hasPermission(user, PERMISSIONS.PAYROLL_OVERRIDE)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!can(user, 'payroll:manage')) {
+      return forbidden('Only Finance or the company owner can override payroll components.');
     }
 
     const body = await req.json();
@@ -21,6 +22,17 @@ export async function POST(
 
     if (!payrollItemId || !componentCode || newAmount == null || !reason) {
       return NextResponse.json({ error: 'payrollItemId, componentCode, newAmount and reason are required' }, { status: 400 });
+    }
+
+    const item = await prisma.payrollItem.findFirst({
+      where: { id: payrollItemId, payrollRunId: id, payrollRun: { tenantId: user.tenantId } },
+      select: { id: true, employeeId: true },
+    });
+    if (!item) {
+      return NextResponse.json({ error: 'Payroll item not found' }, { status: 404 });
+    }
+    if (user.employeeId && item.employeeId === user.employeeId) {
+      return forbidden('You cannot override components of your own payroll.');
     }
 
     const updatedItem = await overridePayrollComponent({

@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const isSuperAdmin = user.roles.includes('PLATFORM_SUPER_ADMIN') || user.roles.includes('COMPANY_ADMIN');
+    const isSuperAdmin = user.roles.includes('PLATFORM_SUPER_ADMIN');
     if (!isSuperAdmin) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }

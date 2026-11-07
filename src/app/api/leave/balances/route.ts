@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
+import { canViewEmployee, forbidden } from '@/lib/access';
 import { getEmployeeAllLeaveBalances } from '@/lib/leave/engine';
 
 export async function GET(req: NextRequest) {
@@ -12,6 +13,10 @@ export async function GET(req: NextRequest) {
 
     if (!employeeId) {
       return NextResponse.json({ error: 'employeeId is required' }, { status: 400 });
+    }
+
+    if (!(await canViewEmployee(user, employeeId, 'leave:approve'))) {
+      return forbidden('You can only view leave balances of yourself or your team.');
     }
 
     const balances = await getEmployeeAllLeaveBalances(user.tenantId, employeeId);

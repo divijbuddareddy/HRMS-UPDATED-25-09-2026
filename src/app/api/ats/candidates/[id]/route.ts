@@ -3,7 +3,7 @@ import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { convertCandidateToEmployee } from '@/lib/ats/engine';
 import { initializeEmployeeOnboarding } from '@/lib/onboarding/engine';
-import { isAdmin } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
 
 export async function PUT(
@@ -15,12 +15,17 @@ export async function PUT(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Only administrators can edit or hire candidates
-    if (!isAdmin(user)) {
-      return NextResponse.json(
-        { error: 'Forbidden: Only administrators have permission to edit candidate status or trigger hiring.' },
-        { status: 403 }
-      );
+    // Only recruiters (HR) / owner can edit or hire candidates
+    if (!can(user, 'recruitment:manage')) {
+      return forbidden('Only HR or the company owner can edit candidates or trigger hiring.');
+    }
+
+    const ownCandidate = await prisma.candidate.findFirst({
+      where: { id, tenantId: user.tenantId },
+      select: { id: true },
+    });
+    if (!ownCandidate) {
+      return NextResponse.json({ error: 'Candidate not found' }, { status: 404 });
     }
 
     const body = await req.json();
@@ -137,12 +142,9 @@ export async function DELETE(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Only administrators can delete candidates
-    if (!isAdmin(user)) {
-      return NextResponse.json(
-        { error: 'Forbidden: Only administrators have permission to delete candidate records.' },
-        { status: 403 }
-      );
+    // Only recruiters (HR) / owner can delete candidates
+    if (!can(user, 'recruitment:manage')) {
+      return forbidden('Only HR or the company owner can delete candidate records.');
     }
 
     const existing = await prisma.candidate.findUnique({ where: { id } });

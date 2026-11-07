@@ -2,18 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { executePayrollCycleRun } from '@/lib/payroll/engine';
-import { hasPermission, PERMISSIONS } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+    // Finance / owner see every run and every employee's pay. Everyone else only sees
+    // locked/published runs that contain their own payslip, and only their own line item.
+    const isPayrollManager = can(user, 'payroll:manage');
+    const selfId = user.employeeId || '__none__';
+
     const runs = await prisma.payrollRun.findMany({
-      where: { tenantId: user.tenantId },
+      where: isPayrollManager
+        ? { tenantId: user.tenantId }
+        : { tenantId: user.tenantId, status: { in: ['LOCKED', 'PUBLISHED'] }, items: { some: { employeeId: selfId } } },
       include: {
         cycle: true,
         items: {
+          where: isPayrollManager ? {} : { employeeId: selfId },
           include: {
             employee: {
               select: {
@@ -44,8 +52,8 @@ export async function POST(req: NextRequest) {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (!hasPermission(user, PERMISSIONS.PAYROLL_RUN)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!can(user, 'payroll:manage')) {
+      return forbidden('Only Finance or the company owner can run payroll.');
     }
 
     const body = await req.json();

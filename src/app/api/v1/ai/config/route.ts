@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
-import { isAdmin } from '@/lib/rbac';
+import { can } from '@/lib/access';
 import {
   getTenantAiConfig,
   saveTenantAiConfig,
@@ -17,9 +17,9 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    if (!isAdmin(user)) {
+    if (!can(user, 'integrations:manage')) {
       return NextResponse.json(
-        { success: false, error: { code: 'FORBIDDEN', message: 'Administrator permission required to view AI configuration' } },
+        { success: false, error: { code: 'FORBIDDEN', message: 'Company owner permission required to view AI configuration' } },
         { status: 403 }
       );
     }
@@ -47,9 +47,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!isAdmin(user)) {
+    if (!can(user, 'integrations:manage')) {
       return NextResponse.json(
-        { success: false, error: { code: 'FORBIDDEN', message: 'Administrator permission required to configure AI provider' } },
+        { success: false, error: { code: 'FORBIDDEN', message: 'Company owner permission required to configure AI provider' } },
         { status: 403 }
       );
     }
@@ -94,9 +94,9 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    if (!isAdmin(user)) {
+    if (!can(user, 'integrations:manage')) {
       return NextResponse.json(
-        { success: false, error: { code: 'FORBIDDEN', message: 'Administrator permission required to delete AI configuration' } },
+        { success: false, error: { code: 'FORBIDDEN', message: 'Company owner permission required to delete AI configuration' } },
         { status: 403 }
       );
     }

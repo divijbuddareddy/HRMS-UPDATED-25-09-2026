@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { executePayrollCycleRun } from '@/lib/payroll/engine';
-import { hasPermission, PERMISSIONS } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 
 export async function POST(
   req: NextRequest,
@@ -13,8 +13,8 @@ export async function POST(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (!hasPermission(user, PERMISSIONS.PAYROLL_RUN)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!can(user, 'payroll:manage')) {
+      return forbidden('Only Finance or the company owner can calculate payroll.');
     }
 
     const run = await prisma.payrollRun.findUnique({

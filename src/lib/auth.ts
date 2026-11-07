@@ -83,6 +83,7 @@ export async function getAuthenticatedUser(req: NextRequest): Promise<AuthUser |
       status: 'ACTIVE',
     },
     include: {
+      tenant: { select: { status: true } },
       userRoles: {
         include: {
           role: {
@@ -104,6 +105,9 @@ export async function getAuthenticatedUser(req: NextRequest): Promise<AuthUser |
   });
 
   if (!user) return null;
+
+  // Existing sessions end immediately when the company is suspended
+  if (user.tenant?.status === 'SUSPENDED' || user.tenant?.status === 'ARCHIVED') return null;
 
   // Accounts with a temporary password may only reach the endpoints needed to set a new one.
   if (user.mustChangePassword) {

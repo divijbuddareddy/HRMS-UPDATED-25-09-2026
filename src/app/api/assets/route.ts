@@ -2,18 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { createAsset } from '@/lib/assets/engine';
-import { isAdmin } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+    // Asset managers (HR / owner) see the whole inventory; everyone else only the assets
+    // currently assigned to them, with only their own assignment rows.
+    const isAssetManager = can(user, 'assets:manage');
+    const selfId = user.employeeId || '__none__';
+
     const assets = await prisma.asset.findMany({
-      where: { tenantId: user.tenantId },
+      where: isAssetManager
+        ? { tenantId: user.tenantId }
+        : { tenantId: user.tenantId, assignments: { some: { employeeId: selfId, returnedDate: null } } },
       include: {
         branchLocation: true,
         assignments: {
+          where: isAssetManager ? {} : { employeeId: selfId },
           include: { employee: true },
           orderBy: { assignedDate: 'desc' },
         },
@@ -32,12 +40,9 @@ export async function POST(req: NextRequest) {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Only administrators have permission to add asset inventory
-    if (!isAdmin(user)) {
-      return NextResponse.json(
-        { error: 'Forbidden: Only administrators have permission to add asset inventory.' },
-        { status: 403 }
-      );
+    // Only HR / owner can add asset inventory
+    if (!can(user, 'assets:manage')) {
+      return forbidden('Only HR or the company owner can add assets to the inventory.');
     }
 
     const body = await req.json();

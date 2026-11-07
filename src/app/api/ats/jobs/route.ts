@@ -2,20 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { createJobRequisition } from '@/lib/ats/engine';
-import { isAdmin } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+    // Recruiters see every requisition with its candidates. Other employees only see published
+    // openings (e.g. for internal referrals), never candidate data.
+    const isRecruiter = can(user, 'recruitment:manage');
     const jobs = await prisma.jobRequisition.findMany({
-      where: { tenantId: user.tenantId },
+      where: isRecruiter ? { tenantId: user.tenantId } : { tenantId: user.tenantId, status: 'PUBLISHED' },
       include: {
         department: true,
         designation: true,
         branchLocation: true,
-        candidates: true,
+        candidates: isRecruiter,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -31,12 +34,9 @@ export async function POST(req: NextRequest) {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Only administrators can create job openings
-    if (!isAdmin(user)) {
-      return NextResponse.json(
-        { error: 'Forbidden: Only administrators have permission to create job openings.' },
-        { status: 403 }
-      );
+    // Only recruiters (HR) / owner can create job openings
+    if (!can(user, 'recruitment:manage')) {
+      return forbidden('Only HR or the company owner can create job openings.');
     }
 
     const body = await req.json();

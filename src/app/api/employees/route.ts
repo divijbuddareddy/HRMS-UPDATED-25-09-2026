@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { hasPermission, getUserDataScope, sanitizeEmployeeForUser, isAdmin, PERMISSIONS } from '@/lib/rbac';
+import { getUserDataScope, sanitizeEmployeeForUser, PERMISSIONS } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
 
 // Generate Tenant-Unique Employee ID based on pattern
@@ -17,10 +18,8 @@ export async function GET(req: NextRequest) {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (!hasPermission(user, PERMISSIONS.EMPLOYEE_READ)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
+    // Every user can at least see their own record: getUserDataScope() falls back to 'OWN'
+    // when the role has no employee:read grant (managers: DIRECT_REPORTS, HR / Finance: tenant).
     const scope = getUserDataScope(user, PERMISSIONS.EMPLOYEE_READ);
     const searchParams = req.nextUrl.searchParams;
     const includeOnboarding = searchParams.get('includeOnboarding') === 'true';
@@ -86,12 +85,9 @@ export async function POST(req: NextRequest) {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Only administrators have access to create new employee records
-    if (!isAdmin(user)) {
-      return NextResponse.json(
-        { error: 'Forbidden: Only administrators have access to create employee records.' },
-        { status: 403 }
-      );
+    // Only HR (employees:manage) or the company owner can create employee records
+    if (!can(user, 'employees:manage')) {
+      return forbidden('Only HR or the company owner can create employee records.');
     }
 
     const body = await req.json();

@@ -43,6 +43,11 @@ export const PERMISSIONS = {
   AUDIT_LOG_READ: 'audit_log:read',
 } as const;
 
+/** Platform owner only (manages all companies). Company admins are NOT platform super admins. */
+export function isPlatformSuperAdmin(user: AuthUser | null | undefined): boolean {
+  return !!user?.roles?.includes('PLATFORM_SUPER_ADMIN');
+}
+
 export function isAdmin(user: AuthUser | null | undefined): boolean {
   if (!user || !user.roles) return false;
   return (

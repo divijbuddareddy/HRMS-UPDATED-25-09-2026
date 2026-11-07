@@ -15,8 +15,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'leaveRequestId is required' }, { status: 400 });
     }
 
-    const leaveReq = await prisma.leaveRequest.findUnique({
-      where: { id: leaveRequestId },
+    const leaveReq = await prisma.leaveRequest.findFirst({
+      where: { id: leaveRequestId, tenantId: user.tenantId },
       include: { employee: true, leaveType: true },
     });
 

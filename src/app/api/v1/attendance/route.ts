@@ -1,11 +1,13 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { authenticateV1Request, jsonResponse, errorResponse } from '@/lib/api/v1-auth';
+import { authenticateV1Request, jsonResponse, errorResponse, requireIntegrationAccess } from '@/lib/api/v1-auth';
 import { recordRawAttendancePunch } from '@/lib/attendance/engine';
 
 export async function GET(req: NextRequest) {
   const auth = await authenticateV1Request(req);
   if (!auth) return errorResponse('Unauthorized', 401, 'UNAUTHORIZED');
+  const denied = requireIntegrationAccess(auth);
+  if (denied) return denied;
 
   const { searchParams } = new URL(req.url);
   const employeeId = searchParams.get('employeeId') || undefined;
@@ -42,6 +44,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await authenticateV1Request(req);
   if (!auth) return errorResponse('Unauthorized', 401, 'UNAUTHORIZED');
+  const denied = requireIntegrationAccess(auth);
+  if (denied) return denied;
 
   try {
     const body = await req.json();

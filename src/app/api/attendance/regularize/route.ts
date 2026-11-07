@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { requestAttendanceRegularization, approveAttendanceRegularization } from '@/lib/attendance/engine';
 import { prisma } from '@/lib/prisma';
-import { hasPermission, PERMISSIONS } from '@/lib/rbac';
+import { can, canActOnEmployee, employeeIdFilter, forbidden, visibleEmployeeIds } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,13 +14,10 @@ export async function GET(req: NextRequest) {
 
     let where: any = { tenantId: user.tenantId };
     if (view === 'mine') {
-      where.employeeId = user.employeeId;
+      where.employeeId = user.employeeId || '__none__';
     } else {
-      // Team / Manager view: either direct reports or pending approvals
-      const isApprover = user.roles.some((r) => ['MANAGER', 'HR_ADMIN', 'COMPANY_ADMIN'].includes(r));
-      if (!isApprover) {
-        where.employeeId = user.employeeId;
-      }
+      // Self for employees, self + direct reports for managers, everyone for HR / owner.
+      Object.assign(where, employeeIdFilter(await visibleEmployeeIds(user, 'attendance:approve')));
     }
 
     const requests = await prisma.attendanceRegularization.findMany({
@@ -81,6 +78,23 @@ export async function PUT(req: NextRequest) {
 
     if (!regularizationId || !['APPROVED', 'REJECTED'].includes(decision)) {
       return NextResponse.json({ error: 'regularizationId and decision (APPROVED/REJECTED) are required' }, { status: 400 });
+    }
+
+    if (!can(user, 'attendance:approve')) {
+      return forbidden('You are not allowed to approve attendance regularization requests.');
+    }
+    const reg = await prisma.attendanceRegularization.findFirst({
+      where: { id: regularizationId, tenantId: user.tenantId },
+      select: { id: true, employeeId: true },
+    });
+    if (!reg) {
+      return NextResponse.json({ error: 'Regularization request not found' }, { status: 404 });
+    }
+    if (user.employeeId && reg.employeeId === user.employeeId) {
+      return forbidden('You cannot approve your own attendance regularization request.');
+    }
+    if (!(await canActOnEmployee(user, reg.employeeId, 'attendance:approve'))) {
+      return forbidden('You can only approve regularization requests of your direct reports.');
     }
 
     const result = await approveAttendanceRegularization({

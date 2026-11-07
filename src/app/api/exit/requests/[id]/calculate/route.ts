@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { canActOnEmployee, forbidden } from '@/lib/access';
 import { calculateFullAndFinalSettlement } from '@/lib/exit/engine';
 
 export async function POST(
@@ -10,6 +12,18 @@ export async function POST(
     const { id } = await params;
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const exitReq = await prisma.exitRequest.findFirst({
+      where: { id, tenantId: user.tenantId },
+      select: { id: true, employeeId: true },
+    });
+    if (!exitReq) {
+      return NextResponse.json({ error: 'Exit request not found' }, { status: 404 });
+    }
+    // Capability check + no one may calculate their own exit settlement.
+    if (!(await canActOnEmployee(user, exitReq.employeeId, 'exit:process'))) {
+      return forbidden('Only HR Admin, Finance or the company owner can calculate full-and-final settlements.');
+    }
 
     const settlement = await calculateFullAndFinalSettlement({
       tenantId: user.tenantId,

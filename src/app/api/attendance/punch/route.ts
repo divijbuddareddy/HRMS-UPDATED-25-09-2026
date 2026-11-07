@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from '@/lib/auth';
 import { recordRawAttendancePunch } from '@/lib/attendance/engine';
 import { prisma } from '@/lib/prisma';
 import { startOfDay, endOfDay } from 'date-fns';
+import { forbidden } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
@@ -67,10 +68,11 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { punchType, latitude, longitude, accuracy, selfieUrl, deviceType, employeeId: requestedEmployeeId } = body;
 
-    const targetEmployeeId = requestedEmployeeId || user.employeeId;
-    if (!targetEmployeeId) {
-      return NextResponse.json({ error: 'Employee ID is required' }, { status: 400 });
+    // Self-service only: nobody can punch in/out on behalf of another employee.
+    if (requestedEmployeeId && requestedEmployeeId !== user.employeeId) {
+      return forbidden('You can only record attendance punches for yourself.');
     }
+    const targetEmployeeId = user.employeeId;
 
     if (!punchType || !['CHECK_IN', 'CHECK_OUT'].includes(punchType)) {
       return NextResponse.json({ error: 'punchType must be CHECK_IN or CHECK_OUT' }, { status: 400 });
@@ -90,8 +92,8 @@ export async function POST(req: NextRequest) {
       ipAddress: clientIp,
     });
 
-    const emp = await prisma.employee.findUnique({
-      where: { id: targetEmployeeId },
+    const emp = await prisma.employee.findFirst({
+      where: { id: targetEmployeeId, tenantId: user.tenantId },
       select: { firstName: true, lastName: true, employeeCode: true },
     });
 

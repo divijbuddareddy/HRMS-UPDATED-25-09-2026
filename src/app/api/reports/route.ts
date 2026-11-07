@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { generateHrmsReport } from '@/lib/reports/engine';
+import { can, forbidden } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   const user = await getAuthenticatedUser(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  if (!can(user, 'reports:view')) {
+    return forbidden('Only HR Admin, Finance or the company owner can view company reports.');
+  }
 
   const { searchParams } = new URL(req.url);
   const type = (searchParams.get('type') || 'EMPLOYEE_MASTER') as any;

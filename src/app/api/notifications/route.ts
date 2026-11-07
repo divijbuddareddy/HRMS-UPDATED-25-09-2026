@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthUserFromRequest } from '@/lib/auth';
+import { can, canCompanyWide, employeeIdFilter, visibleEmployeeIds } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
@@ -19,8 +20,7 @@ export async function GET(req: NextRequest) {
       take: 20,
     });
 
-    // 2. Dynamically gather pending action alerts based on active role
-    const activeRole = user.roles[0] || 'EMPLOYEE';
+    // 2. Dynamically gather pending action alerts based on the user's capabilities
     const alerts: Array<{
       id: string;
       title: string;
@@ -46,13 +46,18 @@ export async function GET(req: NextRequest) {
       });
     });
 
-    // Check for role-specific pending items
-    const isManagerOrAdmin = ['COMPANY_ADMIN', 'HR_ADMIN', 'HR_EXECUTIVE', 'FINANCE', 'MANAGER', 'PLATFORM_SUPER_ADMIN'].includes(activeRole);
+    // Check for capability-specific pending items
+    const notSelf = user.employeeId ? { NOT: { employeeId: user.employeeId } } : {};
 
-    if (isManagerOrAdmin) {
+    if (can(user, 'leave:approve')) {
       // Pending Leaves
       const pendingLeaves = await prisma.leaveRequest.findMany({
-        where: { tenantId: user.tenantId, status: 'PENDING' },
+        where: {
+          tenantId: user.tenantId,
+          status: 'PENDING',
+          ...employeeIdFilter(await visibleEmployeeIds(user, 'leave:approve')),
+          ...notSelf,
+        },
         include: { employee: true, leaveType: true },
         take: 5,
       });
@@ -70,9 +75,17 @@ export async function GET(req: NextRequest) {
         });
       });
 
+    }
+
+    if (can(user, 'attendance:approve')) {
       // Pending Attendance Regularizations
       const pendingRegs = await prisma.attendanceRegularization.findMany({
-        where: { tenantId: user.tenantId, status: 'PENDING' },
+        where: {
+          tenantId: user.tenantId,
+          status: 'PENDING',
+          ...employeeIdFilter(await visibleEmployeeIds(user, 'attendance:approve')),
+          ...notSelf,
+        },
         include: { employee: true },
         take: 5,
       });
@@ -90,11 +103,16 @@ export async function GET(req: NextRequest) {
         });
       });
 
+    }
+
+    if (can(user, 'expense:approve')) {
       // Pending Expense Claims
       const pendingExpenses = await prisma.expenseClaim.findMany({
         where: {
           tenantId: user.tenantId,
           status: { in: ['SUBMITTED', 'PENDING_L2'] },
+          ...employeeIdFilter(await visibleEmployeeIds(user, 'expense:approve')),
+          ...notSelf,
         },
         include: { employee: true, category: true },
         take: 5,
@@ -113,6 +131,9 @@ export async function GET(req: NextRequest) {
         });
       });
 
+    }
+
+    if (canCompanyWide(user, 'exit:process')) {
       // Pending Exit Requests
       const pendingExits = await prisma.exitRequest.findMany({
         where: { tenantId: user.tenantId, status: { in: ['INITIATED', 'APPROVED', 'CLEARANCE_IN_PROGRESS'] } },
@@ -133,6 +154,9 @@ export async function GET(req: NextRequest) {
         });
       });
 
+    }
+
+    if (can(user, 'recruitment:manage')) {
       // Recent Candidate Applications
       const recentCandidates = await prisma.candidate.findMany({
         where: { tenantId: user.tenantId, stage: 'APPLIED' },
@@ -186,8 +210,9 @@ export async function POST(req: NextRequest) {
         data: { isRead: true },
       });
     } else if (notificationId && !notificationId.startsWith('leave-') && !notificationId.startsWith('reg-') && !notificationId.startsWith('exp-') && !notificationId.startsWith('exit-') && !notificationId.startsWith('ats-')) {
-      await prisma.notification.update({
-        where: { id: notificationId },
+      // Only the owner of a notification can mark it read.
+      await prisma.notification.updateMany({
+        where: { id: notificationId, tenantId: user.tenantId, userId: user.userId },
         data: { isRead: true },
       });
     }
