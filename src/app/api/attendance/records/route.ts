@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { startOfMonth, endOfMonth } from 'date-fns';
+import { canViewEmployee, forbidden, visibleEmployeeIds } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,6 +17,13 @@ export async function GET(req: NextRequest) {
     if (!employeeId) {
       return NextResponse.json({ error: 'employeeId required' }, { status: 400 });
     }
+
+    // Own attendance always; others only for HR (company-wide) or a manager (direct reports).
+    if (!(await canViewEmployee(user, employeeId, 'attendance:approve'))) {
+      return forbidden('You can only view attendance of yourself or your team.');
+    }
+    // Employee picker: restrict to the employees this user may view.
+    const visibleIds = await visibleEmployeeIds(user, 'attendance:approve');
 
     const startDate = startOfMonth(new Date(year, month - 1, 1));
     const endDate = endOfMonth(new Date(year, month - 1, 1));
@@ -39,8 +47,8 @@ export async function GET(req: NextRequest) {
         include: { employee: true },
         orderBy: { requestedDate: 'desc' },
       }),
-      prisma.employee.findUnique({
-        where: { id: employeeId },
+      prisma.employee.findFirst({
+        where: { id: employeeId, tenantId: user.tenantId },
         select: {
           id: true,
           firstName: true,
@@ -60,7 +68,7 @@ export async function GET(req: NextRequest) {
         orderBy: { punchTimestamp: 'desc' },
       }),
       prisma.employee.findMany({
-        where: { tenantId: user.tenantId },
+        where: visibleIds === null ? { tenantId: user.tenantId } : { tenantId: user.tenantId, id: { in: visibleIds } },
         select: { id: true, firstName: true, lastName: true, employeeCode: true, workEmail: true },
         orderBy: { firstName: 'asc' },
       }),

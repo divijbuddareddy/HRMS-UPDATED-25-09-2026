@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { lockAndPublishPayrollRun } from '@/lib/payroll/engine';
-import { hasPermission, PERMISSIONS } from '@/lib/rbac';
+import { prisma } from '@/lib/prisma';
+import { can, forbidden } from '@/lib/access';
 
 export async function POST(
   req: NextRequest,
@@ -19,14 +20,14 @@ export async function POST(
       return NextResponse.json({ error: 'Action must be APPROVE, LOCK, or PUBLISH' }, { status: 400 });
     }
 
-    if (action === 'APPROVE' && !hasPermission(user, PERMISSIONS.PAYROLL_APPROVE)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    // Approving, locking and publishing payroll is a Finance (or owner) action.
+    if (!can(user, 'payroll:manage')) {
+      return forbidden('Only Finance or the company owner can approve, lock or publish payroll.');
     }
-    if (action === 'LOCK' && !hasPermission(user, PERMISSIONS.PAYROLL_LOCK)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-    if (action === 'PUBLISH' && !hasPermission(user, PERMISSIONS.PAYROLL_PUBLISH)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+    const run = await prisma.payrollRun.findFirst({ where: { id, tenantId: user.tenantId }, select: { id: true } });
+    if (!run) {
+      return NextResponse.json({ error: 'Payroll run not found' }, { status: 404 });
     }
 
     const updated = await lockAndPublishPayrollRun({

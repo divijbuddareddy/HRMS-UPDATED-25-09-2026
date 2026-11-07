@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { createOnboardingTemplate } from '@/lib/onboarding/engine';
+import { can, forbidden } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,6 +24,10 @@ export async function POST(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    if (!can(user, 'onboarding:manage')) {
+      return forbidden('Only HR or the company owner can create onboarding templates.');
+    }
 
     const body = await req.json();
     const template = await createOnboardingTemplate({

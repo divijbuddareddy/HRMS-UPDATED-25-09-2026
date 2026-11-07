@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { isAdmin } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
 
 export async function GET(
@@ -13,11 +13,15 @@ export async function GET(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+    const isAssetManager = can(user, 'assets:manage');
+    const selfId = user.employeeId || '__none__';
+
     const asset = await prisma.asset.findUnique({
       where: { id },
       include: {
         branchLocation: true,
         assignments: {
+          where: isAssetManager ? {} : { employeeId: selfId },
           include: { employee: true },
           orderBy: { assignedDate: 'desc' },
         },
@@ -25,6 +29,10 @@ export async function GET(
     });
 
     if (!asset || asset.tenantId !== user.tenantId) {
+      return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
+    }
+    // Employees may only view assets currently assigned to them.
+    if (!isAssetManager && !asset.assignments.some((a) => a.returnedDate === null)) {
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
     }
 
@@ -43,12 +51,9 @@ export async function PUT(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Admin only can edit asset data
-    if (!isAdmin(user)) {
-      return NextResponse.json(
-        { error: 'Forbidden: Only administrators have permission to edit asset records.' },
-        { status: 403 }
-      );
+    // Only HR / owner can edit asset records
+    if (!can(user, 'assets:manage')) {
+      return forbidden('Only HR or the company owner can edit asset records.');
     }
 
     const existing = await prisma.asset.findUnique({ where: { id } });
@@ -95,12 +100,9 @@ export async function DELETE(
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Admin only can delete asset data
-    if (!isAdmin(user)) {
-      return NextResponse.json(
-        { error: 'Forbidden: Only administrators have permission to delete asset records.' },
-        { status: 403 }
-      );
+    // Only HR / owner can delete asset records
+    if (!can(user, 'assets:manage')) {
+      return forbidden('Only HR or the company owner can delete asset records.');
     }
 
     const existing = await prisma.asset.findUnique({ where: { id } });

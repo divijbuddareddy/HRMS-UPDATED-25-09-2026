@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { isAdmin } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
 
 export async function GET(req: NextRequest) {
@@ -26,8 +26,8 @@ export async function POST(req: NextRequest) {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (!isAdmin(user)) {
-      return NextResponse.json({ error: 'Forbidden: Only HR or Company Admin can create leave types' }, { status: 403 });
+    if (!can(user, 'leave:configure')) {
+      return forbidden('Only HR Admin or the company owner can create leave types.');
     }
 
     const body = await req.json();

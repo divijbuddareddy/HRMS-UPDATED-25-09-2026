@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { initializeEmployeeOnboarding } from '@/lib/onboarding/engine';
+import { canActOnEmployee, can, employeeIdFilter, forbidden, visibleEmployeeIds } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,10 +12,16 @@ export async function GET(req: NextRequest) {
     const searchParams = req.nextUrl.searchParams;
     const employeeId = searchParams.get('employeeId');
 
+    // HR / owner see every onboarding; everyone else only their own checklist.
+    const visibleIds = await visibleEmployeeIds(user, 'onboarding:manage');
+    if (employeeId && visibleIds !== null && !visibleIds.includes(employeeId)) {
+      return forbidden('You can only view your own onboarding checklist.');
+    }
+
     const instances = await prisma.onboardingInstance.findMany({
       where: {
         tenantId: user.tenantId,
-        ...(employeeId ? { employeeId } : {}),
+        ...(employeeId ? { employeeId } : employeeIdFilter(visibleIds)),
       },
       include: {
         employee: {
@@ -52,6 +59,13 @@ export async function POST(req: NextRequest) {
 
     if (!employeeId) {
       return NextResponse.json({ error: 'employeeId is required' }, { status: 400 });
+    }
+
+    if (!can(user, 'onboarding:manage')) {
+      return forbidden('Only HR or the company owner can start onboarding for an employee.');
+    }
+    if (!(await canActOnEmployee(user, employeeId, 'onboarding:manage', { allowSelf: true }))) {
+      return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
     }
 
     const instance = await initializeEmployeeOnboarding({

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { validateAndApplyLeave } from '@/lib/leave/engine';
+import { employeeIdFilter, visibleEmployeeIds } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
@@ -13,12 +14,11 @@ export async function GET(req: NextRequest) {
 
     let where: any = { tenantId: user.tenantId };
     if (view === 'mine') {
-      where.employeeId = user.employeeId;
+      // No employee profile -> no own requests (never fall back to "everyone").
+      where.employeeId = user.employeeId || '__none__';
     } else {
-      const isManager = user.roles.some((r) => ['MANAGER', 'HR_ADMIN', 'COMPANY_ADMIN'].includes(r));
-      if (!isManager) {
-        where.employeeId = user.employeeId;
-      }
+      // Self for employees, self + direct reports for managers, everyone for company-wide approvers.
+      Object.assign(where, employeeIdFilter(await visibleEmployeeIds(user, 'leave:approve')));
     }
 
     const requests = await prisma.leaveRequest.findMany({

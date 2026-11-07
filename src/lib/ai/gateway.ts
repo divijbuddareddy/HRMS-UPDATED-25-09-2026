@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { prisma } from '../prisma';
 import { AuthUser } from '../types';
 import { hasPermission, PERMISSIONS } from '../rbac';
+import { can } from '../access-policy';
 import { getEmployeeAllLeaveBalances, validateAndApplyLeave } from '../leave/engine';
 import { createAuditLog } from '../audit';
 import { generateInterviewQuestions, summarizeInterviewFeedback, calculateCandidateMatchScore } from '../ats/engine';
@@ -226,7 +227,8 @@ export async function processAiCopilotQuery(req: AiQueryRequest): Promise<AiQuer
 
   // 4. HR Copilot: Headcount & Attrition Summaries (RBAC Protected)
   if (q.includes('headcount') || q.includes('how many employees') || q.includes('attrition') || q.includes('department breakdown')) {
-    const isHRorAdmin = actor.roles.some((r) => ['COMPANY_ADMIN', 'HR_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
+    // Company-wide aggregates: HR (employee records) and report viewers only.
+    const isHRorAdmin = can(actor, 'employees:manage') || can(actor, 'reports:view');
     if (!isHRorAdmin) {
       return {
         answer: 'Access Restricted: You do not have permission to access company-wide headcount or attrition analytics.',

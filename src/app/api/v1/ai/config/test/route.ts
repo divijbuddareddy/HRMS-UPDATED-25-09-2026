@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
-import { isAdmin } from '@/lib/rbac';
+import { can } from '@/lib/access';
 import { testAiProviderConnection, resolveTenantAiCredentials } from '@/lib/ai/config';
 import { createAuditLog } from '@/lib/audit';
 
@@ -14,9 +14,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!isAdmin(user)) {
+    if (!can(user, 'integrations:manage')) {
       return NextResponse.json(
-        { success: false, error: { code: 'FORBIDDEN', message: 'Administrator permission required to test AI provider connection' } },
+        { success: false, error: { code: 'FORBIDDEN', message: 'Company owner permission required to test AI provider connection' } },
         { status: 403 }
       );
     }

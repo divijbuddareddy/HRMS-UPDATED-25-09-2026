@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { can, canCompanyWide } from '@/lib/access-policy';
 import {
   LayoutDashboard,
   Users,
@@ -40,40 +41,51 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { user } = useAuth();
   const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
 
-  const isCompanyAdmin = user?.roles.includes('COMPANY_ADMIN') || user?.roles.includes('PLATFORM_SUPER_ADMIN');
-  const isHR = isCompanyAdmin || user?.roles.includes('HR_ADMIN') || user?.roles.includes('HR_EXECUTIVE');
-  const isFinance = isCompanyAdmin || user?.roles.includes('FINANCE');
-  const isManager = isCompanyAdmin || user?.roles.includes('MANAGER');
+  // Menu visibility follows the same capability table the API enforces (src/lib/access-policy.ts).
+  // Pages that also serve self-service (leave, expenses, payslips, documents, assets, exit ...)
+  // stay visible to everyone; admin-only modules are shown only to roles that can use them.
+  const isSuperAdmin = !!user?.roles.includes('PLATFORM_SUPER_ADMIN');
+  const canManageEmployees = can(user, 'employees:manage');
+  const canViewTeam = can(user, 'team:view');
+  const canManagePayroll = can(user, 'payroll:manage');
+  const canManageAssets = can(user, 'assets:manage');
 
-  const coreNav = [
+  type NavItem = { label: string; href: string; icon: any };
+  const coreNav: NavItem[] = [
     { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { label: 'Employees', href: '/employees', icon: Users },
+    {
+      label: canCompanyWide(user, 'team:view') || canManageEmployees ? 'Employees' : canViewTeam ? 'My Team' : 'My Profile',
+      href: '/employees',
+      icon: Users,
+    },
     { label: 'Attendance', href: '/attendance', icon: Clock },
     { label: 'Leave Ledger', href: '/leave', icon: CalendarCheck },
-    { label: 'Payroll & Tax', href: '/payroll', icon: Banknote },
+    // Employees see their own payslips on the payroll page (runs are filtered server-side).
+    { label: canManagePayroll ? 'Payroll & Tax' : 'My Payslips', href: '/payroll', icon: Banknote },
   ];
 
-  const lifecycleNav = [
-    { label: 'Recruitment (ATS)', href: '/recruitment', icon: UserPlus2 },
+  const lifecycleNav: NavItem[] = [
+    ...(can(user, 'recruitment:manage') ? [{ label: 'Recruitment (ATS)', href: '/recruitment', icon: UserPlus2 }] : []),
     { label: 'Careers Portal', href: '/careers', icon: Sparkles },
-    { label: 'Onboarding', href: '/onboarding', icon: CheckSquare },
+    ...(can(user, 'onboarding:manage') ? [{ label: 'Onboarding', href: '/onboarding', icon: CheckSquare }] : []),
     { label: 'Documents & E-Sign', href: '/documents', icon: FileSignature },
     { label: 'Performance & OKRs', href: '/performance', icon: Target },
     { label: 'Expenses', href: '/expenses', icon: Receipt },
-    { label: 'Assets', href: '/assets', icon: Laptop },
-    { label: 'Exit & Settlement', href: '/exit', icon: LogOut },
+    { label: canManageAssets ? 'Assets' : 'My Assets', href: '/assets', icon: Laptop },
+    {
+      label: can(user, 'exit:process') ? 'Exit & Settlement' : 'Resignation',
+      href: '/exit',
+      icon: LogOut,
+    },
   ];
 
-  const platformNav = [
-    { label: 'Reports & Analytics', href: '/reports', icon: Layers },
-    ...(isHR || isFinance || isCompanyAdmin
-      ? [{ label: 'Audit Trail', href: '/audit', icon: History }]
-      : []),
-    ...(isCompanyAdmin ? [{ label: 'AI Configuration', href: '/settings/ai', icon: Key }] : []),
-    ...(user?.roles.includes('PLATFORM_SUPER_ADMIN')
-      ? [{ label: 'Companies (Super Admin)', href: '/super-admin', icon: Crown }]
-      : []),
+  const platformNav: NavItem[] = [
+    ...(can(user, 'reports:view') ? [{ label: 'Reports & Analytics', href: '/reports', icon: Layers }] : []),
+    ...(can(user, 'audit:view') ? [{ label: 'Audit Trail', href: '/audit', icon: History }] : []),
+    ...(can(user, 'integrations:manage') ? [{ label: 'AI Configuration', href: '/settings/ai', icon: Key }] : []),
+    ...(isSuperAdmin ? [{ label: 'Companies (Super Admin)', href: '/super-admin', icon: Crown }] : []),
   ];
+  const navKey = (user?.roles || []).join(',');
 
   // Proactively prefetch all routes into Next.js cache on mount
   useEffect(() => {
@@ -85,7 +97,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         // ignore
       }
     });
-  }, [router, isCompanyAdmin, isHR, isFinance]);
+  }, [router, navKey]);
 
   // Reset navigating state when pathname changes
   useEffect(() => {
@@ -104,7 +116,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  const renderNavItem = (item: { label: string; href: string; icon: any }) => {
+  const renderNavItem = (item: NavItem) => {
     const isSelected = navigatingTo ? navigatingTo === item.href : pathname === item.href;
     const isPending = navigatingTo === item.href && pathname !== item.href;
     const Icon = item.icon;

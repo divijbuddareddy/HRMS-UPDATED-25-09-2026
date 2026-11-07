@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { hasPermission, PERMISSIONS } from "@/lib/rbac";
+import { can, forbidden } from "@/lib/access";
 import { generatePayslipPDF } from "@/lib/payroll/payslip-pdf";
 
 export async function GET(
@@ -38,8 +38,8 @@ export async function GET(
       return NextResponse.json({ error: "Payslip not found" }, { status: 404 });
     }
 
-    if (payslip.employeeId !== user.employeeId && !hasPermission(user, PERMISSIONS.PAYROLL_READ)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (payslip.employeeId !== user.employeeId && !can(user, "payroll:manage")) {
+      return forbidden("You can only download your own payslips.");
     }
 
     const earningsBreakdown = JSON.parse(payslip.payrollItem?.earningsBreakdown || "{}");

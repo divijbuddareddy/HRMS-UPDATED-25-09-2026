@@ -2,11 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import crypto from 'crypto';
+import { can, forbidden } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    if (!can(user, 'integrations:manage')) {
+      return forbidden('Only the company owner can manage webhook subscriptions.');
+    }
 
     const subscriptions = await prisma.webhookSubscription.findMany({
       where: { tenantId: user.tenantId },
@@ -28,6 +33,10 @@ export async function POST(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    if (!can(user, 'integrations:manage')) {
+      return forbidden('Only the company owner can manage webhook subscriptions.');
+    }
 
     const body = await req.json();
     const secretKey = `whsec_${crypto.randomBytes(24).toString('hex')}`;

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../prisma';
 import { getAuthenticatedUser } from '../auth';
 import { AuthUser, DataScope } from '../types';
+import { can } from '../access';
 
 export interface V1AuthContext {
   user: AuthUser;
@@ -109,4 +110,21 @@ export async function authenticateV1Request(req: NextRequest): Promise<V1AuthCon
   }
 
   return null;
+}
+
+/**
+ * The /api/v1 data endpoints are the machine-integration API. They are open to API-key callers
+ * (an API key acts as the company owner, see above) and to signed-in users holding
+ * `integrations:manage` (company owner). Regular users must use the role-checked /api routes,
+ * otherwise a plain employee's session token could read or write company-wide data here.
+ * Returns a 403 response to send back, or null when access is allowed.
+ */
+export function requireIntegrationAccess(auth: V1AuthContext): NextResponse | null {
+  if (auth.authMethod === 'API_KEY') return null;
+  if (can(auth.user, 'integrations:manage')) return null;
+  return errorResponse(
+    'Forbidden: the v1 integration API requires an API key or company-owner access. Use the regular app APIs instead.',
+    403,
+    'FORBIDDEN'
+  );
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { hasPermission, PERMISSIONS } from '@/lib/rbac';
+import { can, forbidden } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,8 +14,8 @@ export async function GET(req: NextRequest) {
     const year = searchParams.get('year') ? parseInt(searchParams.get('year')!) : undefined;
 
     // Check permissions if requesting other employee's payslip
-    if (employeeId !== user.employeeId && !hasPermission(user, PERMISSIONS.PAYROLL_READ)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (employeeId !== user.employeeId && !can(user, 'payroll:manage')) {
+      return forbidden('You can only view your own payslips.');
     }
 
     if (!employeeId) {

@@ -2,11 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { createAuditLog } from '@/lib/audit';
+import { can, canActOnEmployee, forbidden } from '@/lib/access';
 
 export async function POST(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    // Completing onboarding activates the employee and stores PAN / Aadhaar / bank details
+    // as verified, so it is an HR action.
+    if (!can(user, 'onboarding:manage')) {
+      return forbidden('Only HR or the company owner can complete employee onboarding.');
+    }
 
     const body = await req.json();
     const {
@@ -19,12 +26,28 @@ export async function POST(req: NextRequest) {
       documents,
     } = body;
 
-    const targetEmployeeId = employeeId || (
-      instanceId ? (await prisma.onboardingInstance.findUnique({ where: { id: instanceId } }))?.employeeId : null
-    );
+    const instance = instanceId
+      ? await prisma.onboardingInstance.findFirst({
+          where: { id: instanceId, tenantId: user.tenantId },
+          select: { id: true, employeeId: true },
+        })
+      : null;
+    if (instanceId && !instance) {
+      return NextResponse.json({ error: 'Onboarding instance not found' }, { status: 404 });
+    }
+    if (instance && employeeId && instance.employeeId !== employeeId) {
+      return NextResponse.json({ error: 'Onboarding instance does not belong to this employee' }, { status: 400 });
+    }
+
+    const targetEmployeeId: string | null = employeeId || instance?.employeeId || null;
 
     if (!targetEmployeeId) {
       return NextResponse.json({ error: 'Employee ID or valid Onboarding Instance ID required' }, { status: 400 });
+    }
+
+    // Employee must be in the caller's company; HR cannot verify their own onboarding.
+    if (!(await canActOnEmployee(user, targetEmployeeId, 'onboarding:manage'))) {
+      return forbidden('You cannot complete onboarding for this employee.');
     }
 
     // Validate PAN & Aadhaar numbers

@@ -2,11 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { applyCandidate } from '@/lib/ats/engine';
+import { can, forbidden } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    if (!can(user, 'recruitment:manage')) {
+      return forbidden('Only HR or the company owner can view candidates.');
+    }
 
     const searchParams = req.nextUrl.searchParams;
     const jobId = searchParams.get('jobId');
@@ -35,7 +40,22 @@ export async function POST(req: NextRequest) {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+    if (!can(user, 'recruitment:manage')) {
+      return forbidden('Only HR or the company owner can add candidates.');
+    }
+
     const body = await req.json();
+    if (!body.jobRequisitionId) {
+      return NextResponse.json({ error: 'jobRequisitionId is required' }, { status: 400 });
+    }
+    const job = await prisma.jobRequisition.findFirst({
+      where: { id: body.jobRequisitionId, tenantId: user.tenantId },
+      select: { id: true },
+    });
+    if (!job) {
+      return NextResponse.json({ error: 'Job requisition not found' }, { status: 404 });
+    }
+
     let resumeText = body.resumeText || '';
     if (body.resumeFileName) {
       resumeText = `[Attached File: ${body.resumeFileName}]\n${resumeText}`;

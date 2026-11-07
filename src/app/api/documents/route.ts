@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { generateEmployeeDocument } from '@/lib/documents/engine';
+import { can, canActOnEmployee, forbidden } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,9 +12,7 @@ export async function GET(req: NextRequest) {
     const searchParams = req.nextUrl.searchParams;
     const employeeId = searchParams.get('employeeId');
 
-    const isHR = user.roles.some((r) =>
-      ['PLATFORM_SUPER_ADMIN', 'COMPANY_ADMIN', 'HR_ADMIN', 'HR_EXECUTIVE'].includes(r)
-    );
+    const isHR = can(user, 'documents:manage');
 
     const where: any = {
       tenantId: user.tenantId,
@@ -68,6 +67,14 @@ export async function POST(req: NextRequest) {
 
     if (!employeeId) {
       return NextResponse.json({ error: 'Employee ID is required' }, { status: 400 });
+    }
+
+    // Issuing documents (offer / appointment / relieving letters ...) is an HR action.
+    if (!can(user, 'documents:manage')) {
+      return forbidden('Only HR or the company owner can issue documents.');
+    }
+    if (!(await canActOnEmployee(user, employeeId, 'documents:manage', { allowSelf: true }))) {
+      return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
     }
 
     const document = await generateEmployeeDocument({

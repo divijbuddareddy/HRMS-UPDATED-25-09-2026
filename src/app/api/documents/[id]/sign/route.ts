@@ -15,8 +15,8 @@ export async function POST(
     const body = await req.json();
     const { signatureDataUrl } = body;
 
-    const doc = await prisma.employeeDocument.findUnique({
-      where: { id },
+    const doc = await prisma.employeeDocument.findFirst({
+      where: { id, tenantId: user.tenantId },
     });
 
     if (!doc) {
@@ -28,7 +28,8 @@ export async function POST(
     }
 
     // Strict Authorization: Only the assigned recipient employee can sign this offer letter
-    if (user.employeeId && user.employeeId !== doc.employeeId) {
+    // (A login without an employee profile, e.g. the company owner, cannot sign on anyone's behalf.)
+    if (!user.employeeId || user.employeeId !== doc.employeeId) {
       return NextResponse.json(
         { error: 'Forbidden: Only the recipient employee can sign this offer letter' },
         { status: 403 }
