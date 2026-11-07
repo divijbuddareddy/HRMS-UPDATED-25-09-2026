@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
         tenantId: dbUser.tenantId,
         tenantName: dbUser.tenant.name,
         tenantSlug: dbUser.tenant.slug,
+        mustChangePassword: dbUser.mustChangePassword,
         roles: user.roles,
         permissions: user.permissions,
         employee: dbUser.employee,

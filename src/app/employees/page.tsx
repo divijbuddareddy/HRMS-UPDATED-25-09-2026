@@ -22,7 +22,20 @@ import {
   Lock,
   Check,
   LogOut,
+  KeyRound,
+  Copy,
 } from 'lucide-react';
+
+const LOGIN_ROLE_OPTIONS = [
+  { value: 'EMPLOYEE', label: 'Employee' },
+  { value: 'MANAGER', label: 'Manager' },
+  { value: 'HR_EXECUTIVE', label: 'HR Executive' },
+  { value: 'HR_ADMIN', label: 'HR Admin' },
+  { value: 'FINANCE', label: 'Finance' },
+  { value: 'COMPANY_ADMIN', label: 'Company Admin' },
+];
+
+const roleLabel = (r?: string) => LOGIN_ROLE_OPTIONS.find((o) => o.value === r)?.label || (r || '').replace(/_/g, ' ');
 import { format } from 'date-fns';
 
 export default function EmployeesPage() {
@@ -92,6 +105,18 @@ export default function EmployeesPage() {
   const [newBranchCity, setNewBranchCity] = useState('');
   const [newBranchName, setNewBranchName] = useState('');
   const [savingOrgEntity, setSavingOrgEntity] = useState(false);
+
+  // Employee login (portal access) management
+  const [createLogin, setCreateLogin] = useState(true);
+  const [newLoginRole, setNewLoginRole] = useState('EMPLOYEE');
+  const [credentials, setCredentials] = useState<{ name: string; email: string; password: string; note?: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [manageRole, setManageRole] = useState('EMPLOYEE');
+
+  // Company (legal entity) setup
+  const [companyForm, setCompanyForm] = useState({ name: '', code: '', pan: '', gstin: '', registeredAddress: '' });
+  const [savingCompany, setSavingCompany] = useState(false);
 
   const fetchEmployees = async () => {
     setLoading(true);
@@ -252,7 +277,28 @@ export default function EmployeesPage() {
         body: JSON.stringify(formData),
       });
       if (res.ok) {
+        const created = await res.json();
         setIsAddOpen(false);
+        if (createLogin && created?.id) {
+          const loginRes = await fetch(`/api/employees/${created.id}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: newLoginRole }),
+          });
+          const loginData = await loginRes.json();
+          if (loginRes.ok) {
+            setCopied(false);
+            setCredentials({
+              name: `${created.firstName} ${created.lastName}`,
+              email: loginData.login.email,
+              password: loginData.tempPassword,
+              note: `Role: ${roleLabel(newLoginRole)}`,
+            });
+          } else {
+            alert(`Employee created, but the login could not be created: ${loginData.error || 'unknown error'}`);
+          }
+        }
+        setFormData((f) => ({ ...f, firstName: '', lastName: '', workEmail: '', mobilePhone: '', panNumber: '', aadhaarNumber: '', bankAccountNumber: '' }));
         await fetchEmployees();
       } else {
         const d = await res.json();
@@ -262,6 +308,100 @@ export default function EmployeesPage() {
       alert(e.message);
     }
   };
+
+  const handleCreateLogin = async (emp: any, role: string) => {
+    setLoginBusy(true);
+    try {
+      const res = await fetch(`/api/employees/${emp.id}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        alert(d.error || 'Failed to create login');
+        return;
+      }
+      setSelectedEmp(null);
+      setCopied(false);
+      setCredentials({ name: emp.displayName || `${emp.firstName} ${emp.lastName}`, email: d.login.email, password: d.tempPassword, note: `Role: ${roleLabel(role)}` });
+      await fetchEmployees();
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setLoginBusy(false);
+    }
+  };
+
+  const handleLoginAction = async (emp: any, action: 'RESET_PASSWORD' | 'DISABLE' | 'ENABLE' | 'CHANGE_ROLE', role?: string) => {
+    const name = emp.displayName || `${emp.firstName} ${emp.lastName}`;
+    const prompts: Record<string, string> = {
+      RESET_PASSWORD: `Reset the password for ${name}? Their current password will stop working.`,
+      DISABLE: `Disable login for ${name}? They will not be able to sign in until enabled again.`,
+      ENABLE: `Enable login for ${name}?`,
+      CHANGE_ROLE: `Change ${name}'s access role to ${roleLabel(role)}?`,
+    };
+    if (!confirm(prompts[action])) return;
+    setLoginBusy(true);
+    try {
+      const res = await fetch(`/api/employees/${emp.id}/login`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, role }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        alert(d.error || 'Action failed');
+        return;
+      }
+      setSelectedEmp(null);
+      if (action === 'RESET_PASSWORD' && d.tempPassword) {
+        setCopied(false);
+        setCredentials({ name, email: emp.workEmail, password: d.tempPassword, note: 'Password reset' });
+      }
+      await fetchEmployees();
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setLoginBusy(false);
+    }
+  };
+
+  const handleCreateCompany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingCompany(true);
+    try {
+      const res = await fetch('/api/organization', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'LEGAL_ENTITY', data: companyForm }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        alert(d.error || 'Failed to save company details');
+        return;
+      }
+      setFormData((f) => ({ ...f, legalEntityId: d.id }));
+      await fetchOrg();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setSavingCompany(false);
+    }
+  };
+
+  const copyCredentials = async () => {
+    if (!credentials) return;
+    const text = `HRMS login\nLink: ${window.location.origin}/login\nTenant: ${user?.tenantSlug || ''}\nEmail: ${credentials.email}\nTemporary password: ${credentials.password}\nYou will be asked to set your own password after signing in.`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      alert(text);
+    }
+  };
+
+  const needsCompanySetup = isAdmin && orgData && (orgData.legalEntities?.length ?? 0) === 0;
 
   const handleOpenEdit = (emp: any) => {
     if (!isAdmin) {
@@ -375,6 +515,31 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
   return (
     <DashboardLayout title="Employee Master & Directory" subtitle="Manage employee profiles, identity, bank, and organizational roles">
       <div className="space-y-6">
+        {/* Company setup (required before adding employees) */}
+        {needsCompanySetup && (
+          <form onSubmit={handleCreateCompany} className="bg-white p-5 rounded-2xl border border-amber-200 shadow-sm space-y-3 text-xs">
+            <div>
+              <h3 className="font-semibold text-slate-900 text-sm flex items-center gap-2">
+                <Building className="h-4 w-4 text-amber-600" />
+                Set up your company first
+              </h3>
+              <p className="text-slate-500 mt-0.5">Employees are attached to a legal company. Enter your company details once to start adding employees.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input required placeholder="Legal company name *" value={companyForm.name} onChange={(e) => setCompanyForm({ ...companyForm, name: e.target.value })} className="p-2 bg-slate-50 border border-slate-200 rounded-lg" />
+              <input required placeholder="Short code * (e.g. AL_IN)" value={companyForm.code} onChange={(e) => setCompanyForm({ ...companyForm, code: e.target.value })} className="p-2 bg-slate-50 border border-slate-200 rounded-lg uppercase" />
+              <input placeholder="Company PAN" value={companyForm.pan} onChange={(e) => setCompanyForm({ ...companyForm, pan: e.target.value })} className="p-2 bg-slate-50 border border-slate-200 rounded-lg uppercase" />
+              <input placeholder="GSTIN" value={companyForm.gstin} onChange={(e) => setCompanyForm({ ...companyForm, gstin: e.target.value })} className="p-2 bg-slate-50 border border-slate-200 rounded-lg uppercase" />
+              <input placeholder="Registered address" value={companyForm.registeredAddress} onChange={(e) => setCompanyForm({ ...companyForm, registeredAddress: e.target.value })} className="p-2 bg-slate-50 border border-slate-200 rounded-lg sm:col-span-2" />
+            </div>
+            <div className="flex justify-end">
+              <button type="submit" disabled={savingCompany} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl font-medium">
+                {savingCompany ? 'Saving…' : 'Save company'}
+              </button>
+            </div>
+          </form>
+        )}
+
         {/* Action Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -418,7 +583,9 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
                 </button>
                 <button
                   onClick={() => setIsAddOpen(true)}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-xl flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 transition-colors"
+                  disabled={!!needsCompanySetup}
+                  title={needsCompanySetup ? 'Set up your company first' : undefined}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium text-xs rounded-xl flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 transition-colors"
                 >
                   <UserPlus className="h-3.5 w-3.5" />
                   Add Employee
@@ -444,6 +611,7 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
                   <th className="py-3 px-4">Branch Location</th>
                   <th className="py-3 px-4">Identity (Masked)</th>
                   <th className="py-3 px-4">Status</th>
+                  {isAdmin && <th className="py-3 px-4">Login</th>}
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -466,8 +634,8 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
                       <div className="text-[11px] text-slate-500">{emp.department?.name || '—'}</div>
                     </td>
                     <td className="py-3.5 px-4 text-slate-600">
-                      <div>{emp.branchLocation?.name || 'Bengaluru HQ'}</div>
-                      <div className="text-[11px] text-slate-400">{emp.branchLocation?.state || 'KARNATAKA'}</div>
+                      <div>{emp.branchLocation?.name || '—'}</div>
+                      <div className="text-[11px] text-slate-400">{emp.branchLocation?.state || ''}</div>
                     </td>
                     <td className="py-3.5 px-4">
                       <div className="text-slate-700 font-mono text-[11px]">
@@ -482,10 +650,31 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
                         {emp.status}
                       </span>
                     </td>
+                    {isAdmin && (
+                      <td className="py-3.5 px-4">
+                        {!emp.user ? (
+                          <span className="text-[11px] text-slate-400">No login</span>
+                        ) : emp.user.status !== 'ACTIVE' ? (
+                          <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200">Disabled</span>
+                        ) : (
+                          <div>
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+                              {roleLabel(emp.user.userRoles?.[0]?.role?.name)}
+                            </span>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              {emp.user.mustChangePassword ? 'Awaiting first sign-in' : emp.user.lastLoginAt ? `Last login ${format(new Date(emp.user.lastLoginAt), 'dd MMM yyyy')}` : 'Active'}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    )}
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex justify-end items-center gap-1.5">
                         <button
-                          onClick={() => setSelectedEmp(emp)}
+                          onClick={() => {
+                            setManageRole(emp.user?.userRoles?.[0]?.role?.name || 'EMPLOYEE');
+                            setSelectedEmp(emp);
+                          }}
                           className="px-2.5 py-1 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 rounded-lg text-slate-700 font-medium transition-colors border border-slate-200"
                         >
                           View
@@ -568,6 +757,90 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
                     <div>Bank Acc: <span className="font-mono font-medium">{selectedEmp.bank?.accountNumber || '—'}</span></div>
                   </div>
                 </div>
+
+                {isAdmin && (
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                    <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                      <KeyRound className="h-3.5 w-3.5 text-emerald-600" />
+                      Login Access
+                    </div>
+                    {!selectedEmp.user ? (
+                      <div className="space-y-2">
+                        <p className="text-[11px] text-slate-500">
+                          This employee cannot sign in yet. Create a login to generate a temporary password for <span className="font-mono">{selectedEmp.workEmail}</span>.
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <select value={manageRole} onChange={(e) => setManageRole(e.target.value)} className="p-1.5 bg-white border border-slate-200 rounded-lg text-xs">
+                            {LOGIN_ROLE_OPTIONS.map((o) => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                          </select>
+                          <button
+                            disabled={loginBusy}
+                            onClick={() => handleCreateLogin(selectedEmp, manageRole)}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-lg text-xs font-medium flex items-center gap-1"
+                          >
+                            <KeyRound className="h-3.5 w-3.5" />
+                            Create login
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="text-[11px] text-slate-600">
+                          Status:{' '}
+                          <span className={`font-semibold ${selectedEmp.user.status === 'ACTIVE' ? 'text-emerald-700' : 'text-rose-700'}`}>
+                            {selectedEmp.user.status === 'ACTIVE' ? 'Active' : 'Disabled'}
+                          </span>
+                          {selectedEmp.user.mustChangePassword && ' • awaiting first sign-in'}
+                          {selectedEmp.user.lastLoginAt && ` • last login ${format(new Date(selectedEmp.user.lastLoginAt), 'dd MMM yyyy, HH:mm')}`}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                            value={manageRole}
+                            onChange={(e) => setManageRole(e.target.value)}
+                            className="p-1.5 bg-white border border-slate-200 rounded-lg text-xs"
+                          >
+                            {LOGIN_ROLE_OPTIONS.map((o) => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                          </select>
+                          <button
+                            disabled={loginBusy || manageRole === selectedEmp.user.userRoles?.[0]?.role?.name}
+                            onClick={() => handleLoginAction(selectedEmp, 'CHANGE_ROLE', manageRole)}
+                            className="px-2.5 py-1.5 bg-white hover:bg-slate-100 disabled:opacity-50 border border-slate-200 rounded-lg text-xs font-medium"
+                          >
+                            Change role
+                          </button>
+                          <button
+                            disabled={loginBusy}
+                            onClick={() => handleLoginAction(selectedEmp, 'RESET_PASSWORD')}
+                            className="px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-medium"
+                          >
+                            Reset password
+                          </button>
+                          {selectedEmp.user.status === 'ACTIVE' ? (
+                            <button
+                              disabled={loginBusy}
+                              onClick={() => handleLoginAction(selectedEmp, 'DISABLE')}
+                              className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-medium"
+                            >
+                              Disable login
+                            </button>
+                          ) : (
+                            <button
+                              disabled={loginBusy}
+                              onClick={() => handleLoginAction(selectedEmp, 'ENABLE')}
+                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium"
+                            >
+                              Enable login
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="pt-2 flex justify-between items-center border-t border-slate-100">
@@ -1217,6 +1490,25 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
                   </div>
                 </div>
 
+                <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200 space-y-2">
+                  <label className="flex items-center gap-2 font-semibold text-slate-800 cursor-pointer">
+                    <input type="checkbox" checked={createLogin} onChange={(e) => setCreateLogin(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
+                    <KeyRound className="h-3.5 w-3.5 text-emerald-600" />
+                    Create login for this employee
+                  </label>
+                  {createLogin && (
+                    <div className="flex items-center gap-2 pl-6">
+                      <span className="text-slate-600">Access role:</span>
+                      <select value={newLoginRole} onChange={(e) => setNewLoginRole(e.target.value)} className="p-1.5 bg-white border border-slate-200 rounded-lg text-xs">
+                        {LOGIN_ROLE_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                      <span className="text-[11px] text-slate-500">A temporary password will be shown once.</span>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex justify-end gap-2 pt-3">
                   <button
                     type="button"
@@ -1233,6 +1525,45 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* One-time login credentials */}
+        {credentials && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="h-9 w-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <CheckCircle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-slate-900 text-base">Login ready for {credentials.name}</h3>
+                  {credentials.note && <p className="text-slate-500">{credentials.note}</p>}
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5 font-mono text-[12px]">
+                <div><span className="text-slate-500">Link:</span> {typeof window !== 'undefined' ? `${window.location.origin}/login` : '/login'}</div>
+                <div><span className="text-slate-500">Tenant:</span> {user?.tenantSlug}</div>
+                <div><span className="text-slate-500">Email:</span> {credentials.email}</div>
+                <div><span className="text-slate-500">Temporary password:</span> <span className="font-bold text-slate-900">{credentials.password}</span></div>
+              </div>
+
+              <div className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>This password is shown only once. Share it privately with the employee. They will be asked to set their own password at first sign-in.</span>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button onClick={copyCredentials} className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-medium flex items-center gap-1.5 border border-slate-200">
+                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? 'Copied' : 'Copy details'}
+                </button>
+                <button onClick={() => setCredentials(null)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium">
+                  Done
+                </button>
+              </div>
             </div>
           </div>
         )}

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { LogOut, Shield, UserCheck, Menu } from 'lucide-react';
+import { LogOut, Shield, UserCheck, Menu, KeyRound } from 'lucide-react';
 import { NotificationBell } from '@/components/NotificationBell';
 
 interface HeaderProps {
@@ -81,6 +81,14 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div className="text-[10px] text-slate-500 truncate max-w-[120px]">{user?.email}</div>
           </div>
+
+          <a
+            href="/change-password"
+            title="Change Password"
+            className="p-1.5 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors"
+          >
+            <KeyRound className="h-4 w-4" />
+          </a>
 
           <button
             onClick={logout}
