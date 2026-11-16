@@ -14,7 +14,10 @@ import {
   Clock,
   X,
   ShieldAlert,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
+import { can } from '@/lib/access-policy';
 import { format, differenceInDays } from 'date-fns';
 
 export default function LeavePage() {
@@ -26,6 +29,7 @@ export default function LeavePage() {
   const [ledgerLogs, setLedgerLogs] = useState<any[]>([]);
   const isHRAdmin = user?.roles?.some((r) => ['HR_ADMIN', 'COMPANY_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
   const isManager = user?.roles?.some((r) => ['MANAGER', 'HR_ADMIN', 'COMPANY_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
+  const canConfigureLeave = can(user, 'leave:configure');
   
   const [activeTab, setActiveTab] = useState<'MY_LEAVES' | 'APPROVAL_QUEUE' | 'LEDGER_HISTORY' | 'LEAVE_POLICIES'>('MY_LEAVES');
   const [loading, setLoading] = useState(true);
@@ -62,6 +66,61 @@ export default function LeavePage() {
   const [newTypeMaxCarryForward, setNewTypeMaxCarryForward] = useState('45');
   const [newTypeSandwichRule, setNewTypeSandwichRule] = useState(false);
   const [creatingType, setCreatingType] = useState(false);
+  const [editingTypeId, setEditingTypeId] = useState<string | null>(null);
+  const [deletingTypeId, setDeletingTypeId] = useState<string | null>(null);
+
+  const resetTypeForm = () => {
+    setEditingTypeId(null);
+    setNewTypeName('');
+    setNewTypeCode('');
+    setNewTypeDescription('');
+    setNewTypeIsPaid(true);
+    setNewTypeQuota('18');
+    setNewTypeAccrualRate('1.5');
+    setNewTypeMaxCarryForward('45');
+    setNewTypeSandwichRule(false);
+  };
+
+  const openCreateType = () => {
+    resetTypeForm();
+    setIsCreateTypeOpen(true);
+  };
+
+  const openEditType = (type: any) => {
+    setEditingTypeId(type.id);
+    setNewTypeName(type.name || '');
+    setNewTypeCode(type.code || '');
+    setNewTypeDescription(type.description || '');
+    setNewTypeIsPaid(type.isPaid ?? true);
+    setNewTypeQuota(String(type.policy?.annualQuota ?? 18));
+    setNewTypeAccrualRate(String(type.policy?.accrualRate ?? 1.5));
+    setNewTypeMaxCarryForward(String(type.policy?.maxCarryForward ?? 45));
+    setNewTypeSandwichRule(type.policy?.isSandwichRuleEnabled ?? false);
+    setIsCreateTypeOpen(true);
+  };
+
+  const closeTypeModal = () => {
+    setIsCreateTypeOpen(false);
+    resetTypeForm();
+  };
+
+  const handleDeleteLeaveType = async (type: any) => {
+    if (!confirm(`Delete leave type "${type.name}" (${type.code}) and its policy? This cannot be undone.`)) return;
+    setDeletingTypeId(type.id);
+    try {
+      const res = await fetch(`/api/leave/types/${type.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        await fetchLeaveData();
+      } else {
+        alert(data.error || 'Failed to delete leave type');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setDeletingTypeId(null);
+    }
+  };
 
   const fetchLeaveData = async () => {
     setLoading(true);
@@ -115,8 +174,9 @@ export default function LeavePage() {
     e.preventDefault();
     setCreatingType(true);
     try {
-      const res = await fetch('/api/leave/types', {
-        method: 'POST',
+      const isEdit = !!editingTypeId;
+      const res = await fetch(isEdit ? `/api/leave/types/${editingTypeId}` : '/api/leave/types', {
+        method: isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newTypeName,
@@ -132,14 +192,15 @@ export default function LeavePage() {
 
       const data = await res.json();
       if (res.ok) {
-        setIsCreateTypeOpen(false);
-        setNewTypeName('');
-        setNewTypeCode('');
-        setNewTypeDescription('');
+        closeTypeModal();
         await fetchLeaveData();
-        alert('New Leave Type & Policy successfully created and published for all employees!');
+        alert(
+          isEdit
+            ? 'Leave policy updated successfully.'
+            : 'New Leave Type & Policy successfully created and published for all employees!'
+        );
       } else {
-        alert(data.error || 'Failed to create leave type');
+        alert(data.error || (isEdit ? 'Failed to update leave type' : 'Failed to create leave type'));
       }
     } catch (e: any) {
       alert(e.message);
@@ -307,7 +368,7 @@ export default function LeavePage() {
           <div className="flex items-center gap-2">
             {isHRAdmin && (
               <button
-                onClick={() => setIsCreateTypeOpen(true)}
+                onClick={openCreateType}
                 className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-medium text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-colors"
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -524,7 +585,7 @@ export default function LeavePage() {
                 </p>
               </div>
               <button
-                onClick={() => setIsCreateTypeOpen(true)}
+                onClick={openCreateType}
                 className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-sm flex items-center gap-1.5 transition-colors"
               >
                 <Plus className="h-4 w-4" />
@@ -543,6 +604,7 @@ export default function LeavePage() {
                     <th className="py-3 px-4">Accrual Rate</th>
                     <th className="py-3 px-4">Max Carry Forward</th>
                     <th className="py-3 px-4">Sandwich Rule</th>
+                    {canConfigureLeave && <th className="py-3 px-4 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -570,6 +632,27 @@ export default function LeavePage() {
                           {type.policy?.isSandwichRuleEnabled ? 'ENABLED' : 'DISABLED'}
                         </span>
                       </td>
+                      {canConfigureLeave && (
+                        <td className="py-3 px-4">
+                          <div className="flex justify-end gap-1.5">
+                            <button
+                              onClick={() => openEditType(type)}
+                              title="Edit leave policy"
+                              className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteLeaveType(type)}
+                              disabled={deletingTypeId === type.id}
+                              title="Delete leave policy"
+                              className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -585,9 +668,9 @@ export default function LeavePage() {
               <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                 <h3 className="font-semibold text-slate-900 text-base flex items-center gap-2">
                   <Calendar className="h-5 w-5 text-emerald-600" />
-                  Configure New Leave Type & Policy
+                  {editingTypeId ? 'Edit Leave Type & Policy' : 'Configure New Leave Type & Policy'}
                 </h3>
-                <button onClick={() => setIsCreateTypeOpen(false)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400">
+                <button onClick={closeTypeModal} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -689,7 +772,7 @@ export default function LeavePage() {
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() => setIsCreateTypeOpen(false)}
+                    onClick={closeTypeModal}
                     className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-medium"
                   >
                     Cancel
@@ -699,7 +782,9 @@ export default function LeavePage() {
                     disabled={creatingType}
                     className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-medium shadow-sm shadow-emerald-600/20"
                   >
-                    {creatingType ? 'Creating...' : 'Save & Publish Leave Type'}
+                    {creatingType
+                      ? editingTypeId ? 'Saving...' : 'Creating...'
+                      : editingTypeId ? 'Save Changes' : 'Save & Publish Leave Type'}
                   </button>
                 </div>
               </form>
