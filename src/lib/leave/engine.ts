@@ -121,13 +121,8 @@ export async function validateAndApplyLeave(params: ValidateAndApplyLeaveParams)
     }
     requestedDays = 0.5;
   } else {
-    // Check sandwich rule
-    if (policy?.isSandwichRuleEnabled) {
-      requestedDays = daysInterval.length; // counts weekends/holidays in between
-    } else {
-      // Exclude weekends if sandwich rule disabled
-      requestedDays = daysInterval.filter((d) => !isWeekend(d)).length;
-    }
+    // Weekends are never debited (sandwich rule is not used by this company).
+    requestedDays = daysInterval.filter((d) => !isWeekend(d)).length;
   }
 
   if (requestedDays <= 0) {

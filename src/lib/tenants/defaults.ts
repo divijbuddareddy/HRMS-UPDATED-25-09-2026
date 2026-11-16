@@ -159,7 +159,7 @@ export async function provisionCompanyDefaults(db: Db, tenantId: string) {
   const leaveConfigs = [
     { name: 'Casual Leave', code: 'CL', isPaid: true, color: '#3b82f6', quota: 12, maxNeg: 0, sandwich: false },
     { name: 'Sick Leave', code: 'SL', isPaid: true, color: '#ef4444', quota: 12, maxNeg: 2, sandwich: false },
-    { name: 'Earned Leave', code: 'EL', isPaid: true, color: '#10b981', quota: 18, maxNeg: 0, sandwich: true },
+    { name: 'Earned Leave', code: 'EL', isPaid: true, color: '#10b981', quota: 18, maxNeg: 0, sandwich: false },
     { name: 'Loss of Pay', code: 'LOP', isPaid: false, color: '#6b7280', quota: 0, maxNeg: 99, sandwich: false },
   ];
   for (const lc of leaveConfigs) {

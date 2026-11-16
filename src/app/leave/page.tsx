@@ -64,7 +64,6 @@ export default function LeavePage() {
   const [newTypeQuota, setNewTypeQuota] = useState('18');
   const [newTypeAccrualRate, setNewTypeAccrualRate] = useState('1.5');
   const [newTypeMaxCarryForward, setNewTypeMaxCarryForward] = useState('45');
-  const [newTypeSandwichRule, setNewTypeSandwichRule] = useState(false);
   const [creatingType, setCreatingType] = useState(false);
   const [editingTypeId, setEditingTypeId] = useState<string | null>(null);
   const [deletingTypeId, setDeletingTypeId] = useState<string | null>(null);
@@ -78,7 +77,6 @@ export default function LeavePage() {
     setNewTypeQuota('18');
     setNewTypeAccrualRate('1.5');
     setNewTypeMaxCarryForward('45');
-    setNewTypeSandwichRule(false);
   };
 
   const openCreateType = () => {
@@ -95,7 +93,6 @@ export default function LeavePage() {
     setNewTypeQuota(String(type.policy?.annualQuota ?? 18));
     setNewTypeAccrualRate(String(type.policy?.accrualRate ?? 1.5));
     setNewTypeMaxCarryForward(String(type.policy?.maxCarryForward ?? 45));
-    setNewTypeSandwichRule(type.policy?.isSandwichRuleEnabled ?? false);
     setIsCreateTypeOpen(true);
   };
 
@@ -186,7 +183,6 @@ export default function LeavePage() {
           annualQuota: parseFloat(newTypeQuota) || 18,
           accrualRate: parseFloat(newTypeAccrualRate) || 1.5,
           maxCarryForward: parseFloat(newTypeMaxCarryForward) || 45,
-          isSandwichRuleEnabled: newTypeSandwichRule,
         }),
       });
 
@@ -581,7 +577,7 @@ export default function LeavePage() {
               <div>
                 <h4 className="text-sm font-bold text-slate-900">Configured Leave Types & Policies</h4>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Define leave types, accrual rules, sandwich policy, and carry-forward caps. Changes immediately reflect in employee balances and application forms.
+                  Define leave types, accrual rules, and carry-forward caps. Changes immediately reflect in employee balances and application forms.
                 </p>
               </div>
               <button
@@ -603,7 +599,6 @@ export default function LeavePage() {
                     <th className="py-3 px-4">Annual Quota</th>
                     <th className="py-3 px-4">Accrual Rate</th>
                     <th className="py-3 px-4">Max Carry Forward</th>
-                    <th className="py-3 px-4">Sandwich Rule</th>
                     {canConfigureLeave && <th className="py-3 px-4 text-right">Actions</th>}
                   </tr>
                 </thead>
@@ -625,13 +620,6 @@ export default function LeavePage() {
                       <td className="py-3 px-4 font-bold text-slate-900">{type.policy?.annualQuota ?? 18} days/yr</td>
                       <td className="py-3 px-4 text-slate-700">{type.policy?.accrualRate ?? 1.5} days/{type.policy?.accrualFrequency?.toLowerCase() || 'mo'}</td>
                       <td className="py-3 px-4 text-slate-700">{type.policy?.maxCarryForward ?? 45} days</td>
-                      <td className="py-3 px-4">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold ${
-                          type.policy?.isSandwichRuleEnabled ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-600'
-                        }`}>
-                          {type.policy?.isSandwichRuleEnabled ? 'ENABLED' : 'DISABLED'}
-                        </span>
-                      </td>
                       {canConfigureLeave && (
                         <td className="py-3 px-4">
                           <div className="flex justify-end gap-1.5">
@@ -757,15 +745,6 @@ export default function LeavePage() {
                       className="rounded text-emerald-600 focus:ring-emerald-500"
                     />
                     Paid Leave
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={newTypeSandwichRule}
-                      onChange={(e) => setNewTypeSandwichRule(e.target.checked)}
-                      className="rounded text-emerald-600 focus:ring-emerald-500"
-                    />
-                    Enable Sandwich Rule
                   </label>
                 </div>
 
@@ -893,12 +872,6 @@ export default function LeavePage() {
                   </div>
                 )}
 
-                {selectedPolicy?.isSandwichRuleEnabled && (
-                  <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-                    <span>Sandwich Rule applies to this leave type (weekends in between are debited).</span>
-                  </div>
-                )}
 
                 <div>
                   <label className="font-medium text-slate-700 block mb-1">Backup Approver (Optional Fallback)</label>

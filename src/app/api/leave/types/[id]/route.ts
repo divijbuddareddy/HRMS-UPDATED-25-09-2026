@@ -51,8 +51,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       annualQuota: num(body.annualQuota, p?.annualQuota ?? 18),
       maxCarryForward: num(body.maxCarryForward, p?.maxCarryForward ?? 45),
       allowHalfDay: body.allowHalfDay !== undefined ? Boolean(body.allowHalfDay) : p?.allowHalfDay ?? true,
-      isSandwichRuleEnabled:
-        body.isSandwichRuleEnabled !== undefined ? Boolean(body.isSandwichRuleEnabled) : p?.isSandwichRuleEnabled ?? false,
+      isSandwichRuleEnabled: false, // sandwich rule is not used
       allowProbationApplication:
         body.allowProbationApplication !== undefined
           ? Boolean(body.allowProbationApplication)
