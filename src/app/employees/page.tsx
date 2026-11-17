@@ -499,9 +499,35 @@ export default function EmployeesPage() {
     }
   };
 
-  const sampleCsvTemplate = `firstName,lastName,workEmail,legalEntityCode,branchCode,departmentCode,designationCode,annualCtc,pan,aadhaar,bankAccount,bankName
-Amit,Kapoor,amit.kapoor@aiautomationlabs.com,AIAL_IN,BLR_HQ,ENG,SR_DEV,1600000,ABCDE9988K,9876 1122 3344,50100998811223,HDFC Bank
-Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,ABCDE9988L,9876 1122 3345,50100998811224,ICICI Bank`;
+  const companyCode = orgData?.legalEntities?.[0]?.code || 'COMPANY_CODE';
+  const sampleCsvTemplate = `firstName,lastName,workEmail,employeeCode,mobilePhone,gender,joiningDate,legalEntityCode,branch,department,designation,annualCtc,pan,aadhaar,bankAccount,bankName,ifsc
+Amit,Kapoor,amit.kapoor@yourcompany.com,,9876543210,Male,2026-01-15,${companyCode},Head Office,Engineering,Software Engineer,1200000,ABCDE1234F,123412341234,50100998811223,HDFC Bank,HDFC0001234
+`;
+
+  const downloadTemplate = () => {
+    const blob = new Blob([sampleCsvTemplate], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'employee-import-template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCsvFile = (file?: File | null) => {
+    if (!file) return;
+    if (!/\.csv$/i.test(file.name) && file.type !== 'text/csv') {
+      setImportResult({ error: 'Please choose a .csv file. In Excel use File > Save As > "CSV UTF-8 (Comma delimited)".' });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCsvText(String(reader.result || ''));
+      setImportResult(null);
+    };
+    reader.onerror = () => setImportResult({ error: 'Could not read the file' });
+    reader.readAsText(file);
+  };
 
   const filteredEmployees = employees.filter((emp) => {
     const matchesSearch =
@@ -573,7 +599,8 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
               <>
                 <button
                   onClick={() => {
-                    setCsvText(sampleCsvTemplate);
+                    setCsvText('');
+                    setImportResult(null);
                     setIsImportOpen(true);
                   }}
                   className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-xl flex items-center gap-1.5 border border-slate-200 transition-colors"
@@ -1571,7 +1598,7 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
         {/* CSV Import Modal */}
         {isImportOpen && isAdmin && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                 <h3 className="font-semibold text-slate-900 text-base flex items-center gap-2">
                   <Upload className="h-5 w-5 text-emerald-600" />
@@ -1582,16 +1609,43 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
                 </button>
               </div>
 
-              <p className="text-xs text-slate-500">
-                Paste your CSV content below. Required columns: <code>firstName, lastName, workEmail, legalEntityCode, branchCode, departmentCode, designationCode</code>
-              </p>
+              <div className="text-xs text-slate-500 space-y-1.5">
+                <p>
+                  Upload a CSV file (in Excel: <em>Save As &rarr; CSV UTF-8</em>) or paste CSV text below. Required columns:{' '}
+                  <code>firstName, lastName, workEmail</code>. Optional: <code>employeeCode, mobilePhone, gender, joiningDate (YYYY-MM-DD or DD/MM/YYYY), dob, legalEntityCode, branch, department, designation, annualCtc, pan, aadhaar, uan, bankAccount, bankName, ifsc</code>.
+                </p>
+                <p>Branches, departments and designations that don&apos;t exist yet are created automatically from the names in your file.</p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-medium cursor-pointer flex items-center gap-1.5">
+                  <Upload className="h-3.5 w-3.5" />
+                  Choose CSV file
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      handleCsvFile(e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                <button type="button" onClick={downloadTemplate} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-medium flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5" />
+                  Download template
+                </button>
+                <button type="button" onClick={() => setCsvText(sampleCsvTemplate)} className="px-3 py-2 text-slate-500 hover:text-slate-700 text-xs underline">
+                  Insert sample row
+                </button>
+              </div>
 
               <textarea
                 rows={8}
                 value={csvText}
                 onChange={(e) => setCsvText(e.target.value)}
                 className="w-full p-3 font-mono text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                placeholder="firstName,lastName,workEmail..."
+                placeholder="firstName,lastName,workEmail,department,designation&#10;Amit,Kapoor,amit@yourcompany.com,Engineering,Software Engineer"
               />
 
               {importResult && (
@@ -1604,15 +1658,22 @@ Neha,Sharma,neha.sharma@aiautomationlabs.com,AIAL_IN,BLR_HQ,HR,HR_LEAD,1500000,A
                     )}
                     <span>
                       {importResult.success
-                        ? `Processed ${importResult.importedCount} employees successfully!`
+                        ? `Imported ${importResult.importedCount} of ${importResult.totalProcessed} employees.`
                         : `Error: ${importResult.error}`}
                     </span>
                   </div>
+                  {importResult.success && (importResult.created?.branches?.length > 0 || importResult.created?.departments?.length > 0 || importResult.created?.designations?.length > 0) && (
+                    <div className="mt-1 text-slate-600 space-y-0.5">
+                      {importResult.created.branches?.length > 0 && <div>New branches: {importResult.created.branches.join(', ')}</div>}
+                      {importResult.created.departments?.length > 0 && <div>New departments: {importResult.created.departments.join(', ')}</div>}
+                      {importResult.created.designations?.length > 0 && <div>New designations: {importResult.created.designations.join(', ')}</div>}
+                    </div>
+                  )}
                   {importResult.failedCount > 0 && (
-                    <div className="space-y-1 mt-2 text-rose-700">
+                    <div className="space-y-1 mt-2 text-rose-700 max-h-40 overflow-y-auto">
                       <div>Failed rows ({importResult.failedCount}):</div>
                       {importResult.errors?.map((err: any, idx: number) => (
-                        <div key={idx}>• Row {err.row}: {err.message} ({err.email})</div>
+                        <div key={idx}>• Row {err.row}: {err.message}{err.email ? ` (${err.email})` : ''}</div>
                       ))}
                     </div>
                   )}
