@@ -29,6 +29,18 @@ export async function GET(req: NextRequest) {
   }
 }
 
+const norm = (v: unknown) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+const baseCode = (v: unknown, fallback: string) =>
+  String(v ?? '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || fallback;
+
+/** Returns `base`, or `base_2`, `base_3`, ... — the first one not already used in this tenant. */
+function uniqueCode(base: string, used: string[]) {
+  const taken = new Set(used.map((c) => c.toUpperCase()));
+  let code = base;
+  for (let n = 2; taken.has(code); n++) code = `${base}_${n}`;
+  return code;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
@@ -59,32 +71,51 @@ export async function POST(req: NextRequest) {
         },
       });
     } else if (type === 'DEPARTMENT') {
+      if (!String(data?.name ?? '').trim()) {
+        return NextResponse.json({ error: 'Department name is required.' }, { status: 400 });
+      }
+      const existing = await prisma.department.findMany({ where: { tenantId: user.tenantId } });
+      // Same name already exists: reuse it instead of failing / creating a duplicate.
+      const same = existing.find((d) => norm(d.name) === norm(data.name));
+      if (same) return NextResponse.json(same);
       result = await prisma.department.create({
         data: {
           tenantId: user.tenantId,
-          name: data.name,
-          code: data.code,
+          name: String(data.name).trim(),
+          code: uniqueCode(baseCode(data.code || data.name, 'DEPT'), existing.map((d) => d.code)),
           parentDepartmentId: data.parentDepartmentId || null,
         },
       });
     } else if (type === 'DESIGNATION') {
+      if (!String(data?.title ?? '').trim()) {
+        return NextResponse.json({ error: 'Designation title is required.' }, { status: 400 });
+      }
+      const existing = await prisma.designation.findMany({ where: { tenantId: user.tenantId } });
+      const same = existing.find((d) => norm(d.title) === norm(data.title));
+      if (same) return NextResponse.json(same);
       result = await prisma.designation.create({
         data: {
           tenantId: user.tenantId,
-          title: data.title,
-          code: data.code,
+          title: String(data.title).trim(),
+          code: uniqueCode(baseCode(data.code || data.title, 'ROLE'), existing.map((d) => d.code)),
           departmentId: data.departmentId || null,
         },
       });
     } else if (type === 'BRANCH') {
+      if (!String(data?.name ?? '').trim() || !data?.legalEntityId) {
+        return NextResponse.json({ error: 'Branch name and company are required.' }, { status: 400 });
+      }
+      const existing = await prisma.branchLocation.findMany({ where: { tenantId: user.tenantId } });
+      const same = existing.find((b) => norm(b.name) === norm(data.name));
+      if (same) return NextResponse.json(same);
       result = await prisma.branchLocation.create({
         data: {
           tenantId: user.tenantId,
           legalEntityId: data.legalEntityId,
-          name: data.name,
-          code: data.code,
-          city: data.city,
-          state: data.state,
+          name: String(data.name).trim(),
+          code: uniqueCode(baseCode(data.code || data.city || data.name, 'LOC'), existing.map((b) => b.code)),
+          city: String(data.city ?? '').trim() || String(data.name).trim(),
+          state: String(data.state ?? '').trim(),
           country: data.country || 'India',
           latitude: data.latitude ? parseFloat(data.latitude) : null,
           longitude: data.longitude ? parseFloat(data.longitude) : null,
