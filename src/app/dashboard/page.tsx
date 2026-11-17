@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useDayRollover } from '@/lib/useDayRollover';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
@@ -78,6 +79,10 @@ export default function DashboardPage() {
   useEffect(() => {
     loadData();
   }, [user, activeRole]);
+
+  useDayRollover(() => {
+    loadData();
+  });
 
   const handleQuickPunch = async (punchType: 'CHECK_IN' | 'CHECK_OUT') => {
     setPunching(true);

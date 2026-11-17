@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useDayRollover } from '@/lib/useDayRollover';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -196,6 +197,10 @@ export default function AttendancePage() {
   useEffect(() => {
     fetchAttendance();
   }, [month, year, selectedEmployeeId]);
+
+  useDayRollover(() => {
+    fetchAttendance();
+  });
 
   // Handle standard Web Punch with live GPS detection & fallback
   const handlePunch = async (punchType: 'CHECK_IN' | 'CHECK_OUT') => {

@@ -219,12 +219,10 @@ export async function processDailyAttendanceRecord(
     status = approvedLeave.isHalfDay ? 'HALF_DAY' : (approvedLeave.leaveType.isPaid ? 'PRESENT' : 'LOP');
   } else if (isWeekend) {
     status = 'WEEK_OFF';
-  } else if (totalWorkedMinutes >= shift.fullDayMinutes) {
+  } else if (firstCheckIn) {
+    // Clocked in (and possibly out) today => present. Short days are still visible via
+    // isEarlyDeparture / totalWorkedMinutes, and can be adjusted through regularization.
     status = 'PRESENT';
-  } else if (totalWorkedMinutes >= shift.halfDayMinutes) {
-    status = 'HALF_DAY';
-  } else if (firstCheckIn && !lastCheckOut) {
-    status = 'PRESENT'; // in-progress work day
   }
 
   // Upsert Daily Attendance Record
