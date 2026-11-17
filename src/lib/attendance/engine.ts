@@ -1,7 +1,10 @@
 import { prisma } from '../prisma';
 import { AuthUser } from '../types';
 import { createAuditLog } from '../audit';
-import { startOfDay, endOfDay, differenceInMinutes, parse, format } from 'date-fns';
+import { startOfDay, endOfDay, differenceInMinutes, parse, format, subDays } from 'date-fns';
+
+// Office hours: 10:00 AM - 6:00 PM, no grace period.
+export const DEFAULT_SHIFT = { startTime: '10:00', endTime: '18:00', graceMinutes: 0 };
 
 export interface GeoCoordinate {
   latitude: number;
@@ -103,7 +106,7 @@ export async function processDailyAttendanceRecord(
   });
   if (!employee) return null;
 
-  // Fetch shift policy (or default shift: 09:30 - 18:30)
+  // Fetch shift policy (or default shift: 10:00 - 18:00)
   let shift = await prisma.shiftPolicy.findFirst({
     where: { tenantId, isDefault: true },
   });
@@ -111,11 +114,11 @@ export async function processDailyAttendanceRecord(
     shift = await prisma.shiftPolicy.create({
       data: {
         tenantId,
-        name: 'Standard General Shift',
-        code: 'GEN_0930_1830',
-        startTime: '09:30',
-        endTime: '18:30',
-        graceMinutes: 15,
+        name: 'General Shift (10:00 - 18:00)',
+        code: 'GEN_1000_1800',
+        startTime: DEFAULT_SHIFT.startTime,
+        endTime: DEFAULT_SHIFT.endTime,
+        graceMinutes: DEFAULT_SHIFT.graceMinutes,
         halfDayMinutes: 240,
         fullDayMinutes: 480,
         isDefault: true,
@@ -219,11 +222,14 @@ export async function processDailyAttendanceRecord(
     status = approvedLeave.isHalfDay ? 'HALF_DAY' : (approvedLeave.leaveType.isPaid ? 'PRESENT' : 'LOP');
   } else if (isWeekend) {
     status = 'WEEK_OFF';
-  } else if (firstCheckIn) {
-    // Clocked in (and possibly out) today => present. Short days are still visible via
-    // isEarlyDeparture / totalWorkedMinutes, and can be adjusted through regularization.
+  } else if (firstCheckIn && lastCheckOut && lastCheckOut > firstCheckIn) {
+    // Clocked in AND clocked out => present. Late arrival / early exit are flagged separately.
+    status = 'PRESENT';
+  } else if (firstCheckIn && new Date() <= dayEnd) {
+    // Clocked in, day still running: present until the day closes without a clock-out.
     status = 'PRESENT';
   }
+  // Otherwise (no punch, or the day ended without a clock-out) => ABSENT.
 
   // Upsert Daily Attendance Record
   const existingRecord = await prisma.dailyAttendanceRecord.findUnique({
@@ -386,4 +392,36 @@ export async function approveAttendanceRegularization(params: {
   });
 
   return updatedReg;
+}
+
+
+// Employee statuses that are expected to mark attendance.
+const ATTENDANCE_STATUSES = ['ACTIVE', 'PROBATION', 'CONFIRMED', 'NOTICE', 'TRANSFERRED'];
+
+/**
+ * Closes past days: for every working employee with a login, (re)computes each day from
+ * `daysBack` days ago up to yesterday. Days with no punches, or with a clock-in but no clock-out,
+ * become ABSENT; weekends / holidays / approved leave keep their own status. Regularized days are
+ * left untouched. Safe to run repeatedly.
+ */
+export async function finalizeAttendance(daysBack = 7) {
+  const today = startOfDay(new Date());
+  const employees = await prisma.employee.findMany({
+    where: { userId: { not: null }, status: { in: ATTENDANCE_STATUSES } },
+    select: { id: true, tenantId: true, joiningDate: true },
+  });
+
+  let processed = 0;
+  let absent = 0;
+  for (const emp of employees) {
+    const joined = startOfDay(emp.joiningDate);
+    for (let i = daysBack; i >= 1; i--) {
+      const day = subDays(today, i);
+      if (day < joined) continue;
+      const rec = await processDailyAttendanceRecord(emp.tenantId, emp.id, day);
+      processed += 1;
+      if (rec?.status === 'ABSENT') absent += 1;
+    }
+  }
+  return { employees: employees.length, daysProcessed: processed, absentDays: absent };
 }

@@ -145,8 +145,8 @@ export default function AttendancePage() {
   // Regularize modal
   const [isRegModalOpen, setIsRegModalOpen] = useState(false);
   const [regDate, setRegDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [proposedIn, setProposedIn] = useState('09:30');
-  const [proposedOut, setProposedOut] = useState('18:30');
+  const [proposedIn, setProposedIn] = useState('10:00');
+  const [proposedOut, setProposedOut] = useState('18:00');
   const [regReason, setRegReason] = useState('');
   const [submittingReg, setSubmittingReg] = useState(false);
 
@@ -156,6 +156,8 @@ export default function AttendancePage() {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const isTeamView = selectedEmployeeId === 'ALL';
 
   // Fetch Attendance records
   const fetchAttendance = async () => {
@@ -169,7 +171,9 @@ export default function AttendancePage() {
         setRawPunches(data.rawPunches || []);
         setSummary(data.summary);
         if (data.allEmployees) setAllEmployees(data.allEmployees);
-        if (!selectedEmployeeId && data.employee?.id) {
+        if (!selectedEmployeeId && data.scope === 'ALL') {
+          setSelectedEmployeeId('ALL');
+        } else if (!selectedEmployeeId && data.employee?.id) {
           setSelectedEmployeeId(data.employee.id);
         }
         if (!terminalEmployeeId && data.employee?.id) {
@@ -262,7 +266,7 @@ export default function AttendancePage() {
       // Simulate hardware capture delay
       await new Promise((r) => setTimeout(r, 900));
 
-      const targetEmp = terminalEmployeeId || selectedEmployeeId || user?.employee?.id;
+      const targetEmp = terminalEmployeeId || (selectedEmployeeId !== 'ALL' ? selectedEmployeeId : '') || user?.employee?.id;
 
       const res = await fetch('/api/attendance/punch', {
         method: 'POST',
@@ -455,10 +459,15 @@ export default function AttendancePage() {
                     value={selectedEmployeeId}
                     onChange={(e) => {
                       setSelectedEmployeeId(e.target.value);
-                      setTerminalEmployeeId(e.target.value);
+                      if (e.target.value !== 'ALL') setTerminalEmployeeId(e.target.value);
                     }}
                     className="bg-transparent text-white font-medium focus:outline-none cursor-pointer"
                   >
+                    {(allEmployees.length > 1 || !user?.employee?.id) && (
+                      <option value="ALL" className="bg-slate-900 text-white">
+                        All employees
+                      </option>
+                    )}
                     {allEmployees.map((emp) => (
                       <option key={emp.id} value={emp.id} className="bg-slate-900 text-white">
                         {emp.firstName} {emp.lastName} ({emp.employeeCode})
@@ -720,25 +729,30 @@ export default function AttendancePage() {
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-semibold">
                     <tr>
                       <th className="py-3 px-4">Date & Day</th>
+                      {isTeamView && <th className="py-3 px-4">Employee</th>}
                       <th className="py-3 px-4">Shift & Policy</th>
                       <th className="py-3 px-4">First In (Punch)</th>
                       <th className="py-3 px-4">Last Out (Punch)</th>
                       <th className="py-3 px-4">Total Worked</th>
                       <th className="py-3 px-4">Status</th>
-                      <th className="py-3 px-4">IoT Punch Source</th>
+                      <th className="py-3 px-4">Punch Source</th>
                       <th className="py-3 px-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredRecords.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="py-8 text-center text-slate-400">
+                        <td colSpan={isTeamView ? 9 : 8} className="py-8 text-center text-slate-400">
                           No attendance records found for this period.
                         </td>
                       </tr>
                     ) : (
-                      filteredRecords.map((r, idx) => {
-                        const isBiometric = idx % 2 === 0;
+                      filteredRecords.map((r) => {
+                        const dayKey = format(new Date(r.date), 'yyyy-MM-dd');
+                        const dayPunches = rawPunches.filter(
+                          (p) => p.employeeId === r.employeeId && format(new Date(p.punchTimestamp), 'yyyy-MM-dd') === dayKey,
+                        );
+                        const sources = Array.from(new Set(dayPunches.map((p) => p.deviceType || 'WEB'))) as string[];
                         return (
                           <tr key={r.id} className="hover:bg-slate-50/70 font-sans transition-colors">
                             <td className="py-3 px-4 font-medium text-slate-900">
@@ -748,11 +762,20 @@ export default function AttendancePage() {
                               </div>
                             </td>
 
+                            {isTeamView && (
+                              <td className="py-3 px-4">
+                                <div className="font-medium text-slate-900">
+                                  {r.employee ? `${r.employee.firstName} ${r.employee.lastName}` : '—'}
+                                </div>
+                                <div className="text-[11px] text-slate-400 font-mono">{r.employee?.employeeCode}</div>
+                              </td>
+                            )}
+
                             <td className="py-3 px-4 text-slate-600">
                               <span className="font-medium text-slate-800">
-                                {r.shift?.name || 'Standard General (09:30 - 18:30)'}
+                                {r.shift?.name || 'General Shift (10:00 - 18:00)'}
                               </span>
-                              <span className="block text-[11px] text-slate-400 font-mono">09:30 – 18:30</span>
+                              <span className="block text-[11px] text-slate-400 font-mono">{r.shift ? `${r.shift.startTime} – ${r.shift.endTime}` : '10:00 – 18:00'}</span>
                             </td>
 
                             <td className="py-3 px-4 font-mono font-medium text-slate-800">
@@ -806,24 +829,30 @@ export default function AttendancePage() {
                               {r.status === 'WEEK_OFF' ? (
                                 <span className="text-[11px] text-slate-400">Scheduled Rest</span>
                               ) : (
-                                <div className="flex items-center gap-1.5">
-                                  {isBiometric ? (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-medium text-[11px] border border-emerald-200">
-                                      <Fingerprint className="h-3 w-3" />
-                                      IoT BioGate BLR-01
-                                    </span>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {sources.length === 0 ? (
+                                    <span className="text-[11px] text-slate-400">{r.isRegularized ? 'Regularized' : r.notes?.startsWith('Leave') ? 'Leave' : '—'}</span>
                                   ) : (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-medium text-[11px] border border-blue-200">
-                                      <Smartphone className="h-3 w-3" />
-                                      GPS Indiranagar (Verified)
-                                    </span>
+                                    sources.map((src) => (
+                                      <span
+                                        key={src}
+                                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium text-[11px] border ${
+                                          src === 'BIOMETRIC'
+                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                            : 'bg-blue-50 text-blue-700 border-blue-200'
+                                        }`}
+                                      >
+                                        {src === 'BIOMETRIC' ? <Fingerprint className="h-3 w-3" /> : <Smartphone className="h-3 w-3" />}
+                                        {src === 'BIOMETRIC' ? 'Biometric' : src === 'MOBILE_GPS' ? 'Mobile GPS' : src === 'QR' ? 'QR' : 'Web'}
+                                      </span>
+                                    ))
                                   )}
                                 </div>
                               )}
                             </td>
 
                             <td className="py-3 px-4 text-right">
-                              {r.status !== 'WEEK_OFF' && (
+                              {r.status !== 'WEEK_OFF' && !isTeamView && r.employeeId === user?.employee?.id && (
                                 <button
                                   onClick={() => {
                                     setRegDate(format(new Date(r.date), 'yyyy-MM-dd'));
@@ -1106,6 +1135,7 @@ export default function AttendancePage() {
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-semibold">
                     <tr>
                       <th className="py-3 px-4">Punch Timestamp</th>
+                      {isTeamView && <th className="py-3 px-4">Employee</th>}
                       <th className="py-3 px-4">Punch Type</th>
                       <th className="py-3 px-4">IoT Device / Terminal</th>
                       <th className="py-3 px-4">IP Address</th>
@@ -1121,6 +1151,12 @@ export default function AttendancePage() {
                           <td className="py-3 px-4 font-semibold text-slate-900">
                             {format(new Date(punch.punchTimestamp), 'dd MMM yyyy, hh:mm:ss a')}
                           </td>
+
+                          {isTeamView && (
+                            <td className="py-3 px-4 font-sans text-slate-800">
+                              {punch.employee ? `${punch.employee.firstName} ${punch.employee.lastName}` : '—'}
+                            </td>
+                          )}
 
                           <td className="py-3 px-4">
                             <span

@@ -10,61 +10,81 @@ export async function GET(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const searchParams = req.nextUrl.searchParams;
-    const employeeId = searchParams.get('employeeId') || user.employeeId;
+    const requested = searchParams.get('employeeId');
     const month = parseInt(searchParams.get('month') || String(new Date().getMonth() + 1));
     const year = parseInt(searchParams.get('year') || String(new Date().getFullYear()));
 
-    if (!employeeId) {
-      return NextResponse.json({ error: 'employeeId required' }, { status: 400 });
+    // Employees this user may view: null = whole company (HR / owner), otherwise self + direct reports.
+    const visibleIds = await visibleEmployeeIds(user, 'attendance:approve');
+    const canSeeOthers = visibleIds === null || visibleIds.some((id) => id !== user.employeeId);
+
+    // "ALL" = team view. Also the default for owners/HR who have no employee profile of their own.
+    const allMode = requested === 'ALL' || (!requested && !user.employeeId && canSeeOthers);
+    const employeeId = allMode ? null : requested || user.employeeId;
+
+    if (allMode) {
+      if (!canSeeOthers) return forbidden('You can only view your own attendance.');
+    } else {
+      if (!employeeId) {
+        return NextResponse.json({ error: 'Your login is not linked to an employee profile.' }, { status: 400 });
+      }
+      // Own attendance always; others only for HR (company-wide) or a manager (direct reports).
+      if (!(await canViewEmployee(user, employeeId, 'attendance:approve'))) {
+        return forbidden('You can only view attendance of yourself or your team.');
+      }
     }
 
-    // Own attendance always; others only for HR (company-wide) or a manager (direct reports).
-    if (!(await canViewEmployee(user, employeeId, 'attendance:approve'))) {
-      return forbidden('You can only view attendance of yourself or your team.');
-    }
-    // Employee picker: restrict to the employees this user may view.
-    const visibleIds = await visibleEmployeeIds(user, 'attendance:approve');
+    const empFilter = allMode
+      ? visibleIds === null
+        ? {}
+        : { employeeId: { in: visibleIds } }
+      : { employeeId: employeeId! };
 
     const startDate = startOfMonth(new Date(year, month - 1, 1));
     const endDate = endOfMonth(new Date(year, month - 1, 1));
+
+    const empSelect = { select: { id: true, firstName: true, lastName: true, employeeCode: true } };
 
     const [records, regularizations, employee, rawPunches, allEmployees] = await Promise.all([
       prisma.dailyAttendanceRecord.findMany({
         where: {
           tenantId: user.tenantId,
-          employeeId,
+          ...empFilter,
           date: { gte: startDate, lte: endDate },
         },
-        include: { shift: true },
-        orderBy: { date: 'asc' },
+        include: { shift: true, employee: empSelect },
+        orderBy: allMode ? [{ date: 'desc' }, { employee: { firstName: 'asc' } }] : { date: 'asc' },
       }),
       prisma.attendanceRegularization.findMany({
         where: {
           tenantId: user.tenantId,
-          employeeId,
+          ...empFilter,
           requestedDate: { gte: startDate, lte: endDate },
         },
         include: { employee: true },
         orderBy: { requestedDate: 'desc' },
       }),
-      prisma.employee.findFirst({
-        where: { id: employeeId, tenantId: user.tenantId },
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          employeeCode: true,
-          department: true,
-          designation: true,
-          branchLocation: true,
-        },
-      }),
+      employeeId
+        ? prisma.employee.findFirst({
+            where: { id: employeeId, tenantId: user.tenantId },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              employeeCode: true,
+              department: true,
+              designation: true,
+              branchLocation: true,
+            },
+          })
+        : Promise.resolve(null),
       prisma.rawAttendancePunch.findMany({
         where: {
           tenantId: user.tenantId,
-          employeeId,
+          ...empFilter,
           punchTimestamp: { gte: startDate, lte: endDate },
         },
+        include: { employee: empSelect },
         orderBy: { punchTimestamp: 'desc' },
       }),
       prisma.employee.findMany({
@@ -106,6 +126,7 @@ export async function GET(req: NextRequest) {
     const totalPunches = rawPunches.length;
 
     return NextResponse.json({
+      scope: allMode ? 'ALL' : 'EMPLOYEE',
       employee,
       month,
       year,
