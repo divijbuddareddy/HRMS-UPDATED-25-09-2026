@@ -78,13 +78,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'punchType must be CHECK_IN or CHECK_OUT' }, { status: 400 });
     }
 
+    // Enforce the order: one clock-in, then one clock-out, per day.
+    const todayPunches = await prisma.rawAttendancePunch.findMany({
+      where: {
+        tenantId: user.tenantId,
+        employeeId: targetEmployeeId,
+        punchTimestamp: { gte: startOfDay(new Date()), lte: endOfDay(new Date()) },
+      },
+      select: { punchType: true },
+    });
+    const checkedIn = todayPunches.some((p) => p.punchType === 'CHECK_IN');
+    const checkedOut = todayPunches.some((p) => p.punchType === 'CHECK_OUT');
+    if (punchType === 'CHECK_IN' && checkedIn) {
+      return NextResponse.json({ error: 'You have already clocked in today.' }, { status: 409 });
+    }
+    if (punchType === 'CHECK_OUT' && !checkedIn) {
+      return NextResponse.json({ error: 'You have not clocked in today. Please clock in first.' }, { status: 409 });
+    }
+    if (punchType === 'CHECK_OUT' && checkedOut) {
+      return NextResponse.json({ error: 'You have already clocked out today.' }, { status: 409 });
+    }
+
     const clientIp = req.headers.get('x-forwarded-for') || '192.168.1.140';
 
     const punch = await recordRawAttendancePunch({
       tenantId: user.tenantId,
       employeeId: targetEmployeeId,
       punchType,
-      deviceType: deviceType || 'BIOMETRIC',
+      deviceType: deviceType || 'WEB',
       latitude: latitude != null ? parseFloat(latitude) : 12.9716,
       longitude: longitude != null ? parseFloat(longitude) : 77.5946,
       accuracy: accuracy != null ? parseFloat(accuracy) : 5,
@@ -101,7 +122,7 @@ export async function POST(req: NextRequest) {
       success: true,
       punch,
       employee: emp,
-      message: `${punchType === 'CHECK_IN' ? 'Check-in' : 'Check-out'} recorded successfully via ${deviceType || 'BIOMETRIC'}.`,
+      message: `${punchType === 'CHECK_IN' ? 'Check-in' : 'Check-out'} recorded successfully via ${deviceType || 'WEB'}.`,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

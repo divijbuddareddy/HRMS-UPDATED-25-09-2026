@@ -93,6 +93,7 @@ export default function DashboardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           punchType,
+          deviceType: 'WEB',
           latitude: 12.9716, // Indiranagar HQ coords
           longitude: 77.5946,
           accuracy: 10,
@@ -104,6 +105,7 @@ export default function DashboardPage() {
         await loadData();
       } else {
         setPunchMessage(data.error);
+        await loadData(); // resync buttons with the server's state
       }
     } catch (err: any) {
       setPunchMessage(err.message);

@@ -246,6 +246,7 @@ export default function AttendancePage() {
         await fetchAttendance();
       } else {
         setPunchMsg({ type: 'error', text: data.error });
+        await fetchAttendance(); // resync buttons with the server's state
       }
     } catch (e: any) {
       setPunchMsg({ type: 'error', text: e.message });
@@ -585,7 +586,7 @@ export default function AttendancePage() {
               </div>
             </div>
             <div className="mt-2 flex items-center text-[11px] text-amber-600 font-medium">
-              <span>&gt; 15m grace window</span>
+              <span>After 10:00 AM (no grace)</span>
             </div>
           </div>
 
