@@ -85,6 +85,16 @@ export default function DocumentsPage() {
   const [penColor, setPenColor] = useState('#0f172a');
   const [uploadedSignImage, setUploadedSignImage] = useState<string | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+
+  // Adopt & Sign: the employee's saved signature, whether to use it, and whether to adopt a new one
+  const [adoptedSig, setAdoptedSig] = useState<{ signatureDataUrl: string; method: string; updatedAt: string } | null>(null);
+  const [useAdopted, setUseAdopted] = useState(true);
+  const [adoptNew, setAdoptNew] = useState(true);
+  useEffect(() => {
+    // Each newly opened document starts with the adopted signature (if any) pre-selected
+    setUseAdopted(true);
+    setAdoptNew(true);
+  }, [selectedDoc?.id]);
   const [signing, setSigning] = useState(false);
 
   // Canvas ref for drawing signature
@@ -110,6 +120,8 @@ export default function DocumentsPage() {
       if (dRes.ok) setDocuments((await dRes.json()).documents || []);
       if (tRes.ok) setTemplates((await tRes.json()).templates || []);
       if (eRes.ok) setEmployees((await eRes.json()).employees || []);
+      const sRes = await fetch('/api/signature');
+      if (sRes.ok) setAdoptedSig((await sRes.json()).signature || null);
     } catch (e) {
       console.error('Failed to load documents data:', e);
     } finally {
@@ -307,28 +319,49 @@ export default function DocumentsPage() {
     },
   });
 
-  // Generate signature data URL
-  const generateSignaturePayload = (): string => {
+  // Build the signature as a clean PNG (drawn, typed or uploaded) so every signature is stored the same way.
+  const loadImage = (src: string) =>
+    new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Could not read the signature image'));
+      img.src = src;
+    });
+
+  const generateSignaturePayload = async (): Promise<string> => {
     if (signMethod === 'DRAW' && canvasRef.current && hasDrawnSignature) {
       return canvasRef.current.toDataURL('image/png');
     }
 
+    const out = document.createElement('canvas');
+    const ctx = out.getContext('2d');
+    if (!ctx) throw new Error('Your browser cannot create signatures');
+
     if (signMethod === 'UPLOAD' && uploadedSignImage) {
-      return uploadedSignImage;
+      const img = await loadImage(uploadedSignImage);
+      const scale = Math.min(1, 600 / img.width, 200 / img.height);
+      out.width = Math.max(1, Math.round(img.width * scale));
+      out.height = Math.max(1, Math.round(img.height * scale));
+      ctx.drawImage(img, 0, 0, out.width, out.height);
+      return out.toDataURL('image/png');
     }
 
-    // TYPE mode or fallback: create SVG signature
-    const textToSign = typedSignatureName.trim() || 'Digitally Signed';
-    const fontClass =
+    // TYPE: render the typed name in the chosen style
+    const text = typedSignatureName.trim();
+    const font =
       typedSignatureFont === 'font-serif italic'
-        ? "font-family:'Brush Script MT', 'Dancing Script', 'Great Vibes', cursive; font-style:italic;"
+        ? "italic 44px 'Brush Script MT', 'Segoe Script', 'Dancing Script', cursive"
         : typedSignatureFont === 'font-mono'
-        ? "font-family:monospace; font-weight:bold;"
-        : "font-family:sans-serif; font-style:italic;";
-
-    return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100"><rect width="100%" height="100%" fill="none"/><text x="20" y="65" fill="${encodeURIComponent(
-      penColor
-    )}" font-size="34" style="${fontClass}">${encodeURIComponent(textToSign)}</text></svg>`;
+        ? 'bold 34px ui-monospace, Menlo, Consolas, monospace'
+        : 'italic 38px ui-sans-serif, Arial, sans-serif';
+    ctx.font = font;
+    out.width = Math.min(900, Math.ceil(ctx.measureText(text).width) + 40);
+    out.height = 100;
+    ctx.font = font; // resizing the canvas resets the context
+    ctx.fillStyle = penColor;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 20, 52);
+    return out.toDataURL('image/png');
   };
 
   // Handle HR creating / uploading an offer letter
@@ -494,7 +527,9 @@ export default function DocumentsPage() {
     }
   };
 
-  // Handle employee digital signing
+  // Handle employee digital signing ("Sign with adopted signature" / "Adopt and Sign")
+  const signingWithAdopted = !!adoptedSig && useAdopted;
+
   const handleSignDocument = async () => {
     if (!selectedDoc) return;
     if (!agreedToTerms) {
@@ -502,35 +537,39 @@ export default function DocumentsPage() {
       return;
     }
 
-    if (signMethod === 'DRAW' && !hasDrawnSignature) {
-      alert('Please draw your signature in the signature box.');
-      return;
-    }
-
-    if (signMethod === 'TYPE' && !typedSignatureName.trim()) {
-      alert('Please type your name for the digital signature.');
-      return;
-    }
-
-    if (signMethod === 'UPLOAD' && !uploadedSignImage) {
-      alert('Please upload your signature image.');
-      return;
+    if (!signingWithAdopted) {
+      if (signMethod === 'DRAW' && !hasDrawnSignature) {
+        alert('Please draw your signature in the signature box.');
+        return;
+      }
+      if (signMethod === 'TYPE' && !typedSignatureName.trim()) {
+        alert('Please type your name for the digital signature.');
+        return;
+      }
+      if (signMethod === 'UPLOAD' && !uploadedSignImage) {
+        alert('Please upload your signature image.');
+        return;
+      }
     }
 
     setSigning(true);
     try {
-      const signatureDataUrl = generateSignaturePayload();
+      const payload = signingWithAdopted
+        ? { useAdopted: true }
+        : { signatureDataUrl: await generateSignaturePayload(), adopt: adoptNew, method: signMethod };
       const res = await fetch(`/api/documents/${selectedDoc.id}/sign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          signatureDataUrl,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
       if (res.ok) {
-        alert('Offer Letter signed and submitted successfully! The HR team can now review the executed record.');
+        alert(
+          !signingWithAdopted && adoptNew
+            ? 'Signature adopted and document signed. Next time you can sign with one click.'
+            : 'Document signed and submitted successfully! HR can now see the signed copy.',
+        );
         setSelectedDoc(null);
         await fetchData();
       } else {
@@ -540,6 +579,17 @@ export default function DocumentsPage() {
       alert(e.message || 'An error occurred while signing');
     } finally {
       setSigning(false);
+    }
+  };
+
+  const removeAdoptedSignature = async () => {
+    if (!confirm('Remove your adopted signature? Documents you already signed are not affected.')) return;
+    const res = await fetch('/api/signature', { method: 'DELETE' });
+    if (res.ok) {
+      setAdoptedSig(null);
+      setUseAdopted(false);
+    } else {
+      alert('Could not remove the signature');
     }
   };
 
@@ -579,6 +629,35 @@ export default function DocumentsPage() {
       subtitle="Issue, upload, sign, and verify employee offer letters and legal agreements with cryptographic SHA-256 seal"
     >
       <div className="space-y-6">
+        {/* My adopted signature (employees) */}
+        {user?.employee?.id && (
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                <FileSignature className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-slate-900">My Signature</div>
+                <div className="text-xs text-slate-500">
+                  {adoptedSig
+                    ? `Adopted ${new Date(adoptedSig.updatedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} — used when you click “Sign with adopted signature”.`
+                    : 'No signature adopted yet. The first time you sign a document, tick “Adopt this signature” to reuse it.'}
+                </div>
+              </div>
+            </div>
+            {adoptedSig && (
+              <div className="flex items-center gap-3">
+                <div className="h-12 px-3 bg-slate-50 rounded-xl border border-dashed border-slate-200 flex items-center">
+                  <img src={adoptedSig.signatureDataUrl} alt="My adopted signature" className="max-h-10 object-contain" />
+                </div>
+                <button onClick={removeAdoptedSignature} className="text-xs text-rose-600 hover:underline font-semibold">
+                  Remove
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Top Metric Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
@@ -1275,6 +1354,7 @@ export default function DocumentsPage() {
                           </div>
 
                           {/* Signature Method Selector */}
+                          {!signingWithAdopted && (
                           <div className="flex bg-slate-200/80 p-1 rounded-xl text-xs font-semibold text-slate-700">
                             <button
                               type="button"
@@ -1307,11 +1387,30 @@ export default function DocumentsPage() {
                               Upload
                             </button>
                           </div>
+                          )}
                         </div>
 
                         {/* Signature Input Canvas / Control */}
                         <div className="space-y-3">
-                          {signMethod === 'DRAW' && (
+                          {signingWithAdopted && adoptedSig && (
+                            <div className="p-4 bg-white rounded-2xl border-2 border-emerald-300 space-y-2">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-semibold text-emerald-800">Your adopted signature</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setUseAdopted(false)}
+                                  className="text-slate-500 hover:text-emerald-700 font-semibold underline"
+                                >
+                                  Use a different signature
+                                </button>
+                              </div>
+                              <div className="h-24 flex items-center justify-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                <img src={adoptedSig.signatureDataUrl} alt="Adopted signature" className="max-h-20 object-contain" />
+                              </div>
+                            </div>
+                          )}
+
+                          {!signingWithAdopted && signMethod === 'DRAW' && (
                             <div className="space-y-2">
                               <div className="flex justify-between items-center text-xs">
                                 <span className="text-slate-500">Sign with mouse, trackpad, or finger below:</span>
@@ -1362,7 +1461,7 @@ export default function DocumentsPage() {
                             </div>
                           )}
 
-                          {signMethod === 'TYPE' && (
+                          {!signingWithAdopted && signMethod === 'TYPE' && (
                             <div className="space-y-3">
                               <div>
                                 <label className="block text-xs font-semibold text-slate-600 mb-1">
@@ -1416,7 +1515,7 @@ export default function DocumentsPage() {
                             </div>
                           )}
 
-                          {signMethod === 'UPLOAD' && (
+                          {!signingWithAdopted && signMethod === 'UPLOAD' && (
                             <div className="space-y-2">
                               <label className="block text-xs font-semibold text-slate-600">
                                 Upload Signature Image (PNG / JPG with transparent or white background)
@@ -1450,6 +1549,31 @@ export default function DocumentsPage() {
                                     className="hidden"
                                   />
                                 </label>
+                              )}
+                            </div>
+                          )}
+
+                          {!signingWithAdopted && (
+                            <div className="flex items-center justify-between gap-3">
+                              <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={adoptNew}
+                                  onChange={(e) => setAdoptNew(e.target.checked)}
+                                  className="rounded text-emerald-600 focus:ring-emerald-500 h-4 w-4"
+                                />
+                                <span>
+                                  <strong>Adopt this signature</strong> — save it so I can sign future documents with one click
+                                </span>
+                              </label>
+                              {adoptedSig && (
+                                <button
+                                  type="button"
+                                  onClick={() => setUseAdopted(true)}
+                                  className="text-xs text-emerald-700 font-semibold underline shrink-0"
+                                >
+                                  Use my adopted signature
+                                </button>
                               )}
                             </div>
                           )}
@@ -1511,7 +1635,13 @@ export default function DocumentsPage() {
                       className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/25 flex items-center gap-2 transition-all active:scale-95"
                     >
                       <FileSignature className="h-4 w-4" />
-                      {signing ? 'Signing & Verifying...' : 'Sign & Submit Offer Letter'}
+                      {signing
+                        ? 'Signing & Verifying...'
+                        : signingWithAdopted
+                        ? 'Sign with adopted signature'
+                        : adoptNew
+                        ? 'Adopt and Sign'
+                        : 'Sign & Submit'}
                     </button>
                   )}
                 </div>

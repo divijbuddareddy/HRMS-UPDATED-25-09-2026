@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { signEmployeeDocument } from '@/lib/documents/engine';
+import { adoptSignature, getAdoptedSignature, validateSignatureImage } from '@/lib/documents/signature';
 
 export async function POST(
   req: NextRequest,
@@ -13,7 +14,7 @@ export async function POST(
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
-    const { signatureDataUrl } = body;
+    const { useAdopted, adopt, method } = body;
 
     const doc = await prisma.employeeDocument.findFirst({
       where: { id, tenantId: user.tenantId },
@@ -36,6 +37,22 @@ export async function POST(
       );
     }
 
+    // Signature: the employee's adopted one ("Sign with adopted signature"), or a new one
+    // drawn / typed / uploaded now — optionally adopted for next time ("Adopt and Sign").
+    let signatureDataUrl: string;
+    if (useAdopted) {
+      const adopted = await getAdoptedSignature(user.employeeId);
+      if (!adopted) {
+        return NextResponse.json({ error: 'You have not adopted a signature yet. Please draw, type or upload one.' }, { status: 400 });
+      }
+      signatureDataUrl = adopted.signatureDataUrl;
+    } else {
+      const invalid = validateSignatureImage(body.signatureDataUrl);
+      if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
+      signatureDataUrl = body.signatureDataUrl;
+      if (adopt) await adoptSignature(user.tenantId, user.employeeId, signatureDataUrl, String(method || 'DRAW'));
+    }
+
     const signerId = doc.employeeId;
     const clientIp = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '127.0.0.1';
 
@@ -43,7 +60,7 @@ export async function POST(
       tenantId: user.tenantId,
       documentId: id,
       signerEmployeeId: signerId,
-      signatureDataUrl: signatureDataUrl || 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMzAiPjx0ZXh0IHk9IjIwIiBmb250LWZhbWlseT0iY3Vyc2l2ZSI+U2lnbmVkPC90ZXh0Pjwvc3ZnPg==',
+      signatureDataUrl,
       ipAddress: clientIp,
       actor: user,
     });
