@@ -1,6 +1,7 @@
 import { prisma } from '../prisma';
 import { AuthUser } from '../types';
 import { createAuditLog } from '../audit';
+import { OPEN_STATUSES, initialApprovalState } from './approval';
 import { differenceInDays, getDaysInMonth, getDate } from 'date-fns';
 import { calculateEmployeeLeaveBalance } from '../leave/engine';
 import { generateEmployeeDocument } from '../documents/engine';
@@ -49,11 +50,30 @@ export async function submitExitRequest(params: {
   requestedLwd: Date;
   reason: string;
   reasonCategory?: string;
+  /** HR-initiated exit: already approved by HR (no manager / HR approval steps). */
+  initiatedByHr?: { approverUserId: string };
 }) {
-  const employee = await prisma.employee.findUnique({
-    where: { id: params.employeeId },
+  const employee = await prisma.employee.findFirst({
+    where: { id: params.employeeId, tenantId: params.tenantId },
   });
   if (!employee) throw new Error('Employee not found');
+
+  const open = await prisma.exitRequest.findFirst({
+    where: { tenantId: params.tenantId, employeeId: params.employeeId, status: { in: OPEN_STATUSES } },
+    select: { id: true },
+  });
+  if (open) throw new Error('There is already an open resignation for this employee. Withdraw it first to submit a new one.');
+
+  const approval = params.initiatedByHr
+    ? {
+        status: 'APPROVED',
+        managerApproval: 'NOT_REQUIRED',
+        hrApproval: 'APPROVED',
+        hrApproverId: params.initiatedByHr.approverUserId,
+        hrDecidedAt: new Date(),
+        hrNote: 'Exit initiated by HR',
+      }
+    : await initialApprovalState(params.tenantId, params.employeeId);
 
   const exitReq = await prisma.exitRequest.create({
     data: {
@@ -64,15 +84,14 @@ export async function submitExitRequest(params: {
       approvedLwd: params.requestedLwd,
       reason: params.reason,
       reasonCategory: params.reasonCategory || 'BETTER_OPPORTUNITY',
-      status: 'INITIATED',
+      ...approval,
     },
   });
 
-  // Update employee status to NOTICE
-  await prisma.employee.update({
-    where: { id: params.employeeId },
-    data: { status: 'NOTICE' },
-  });
+  // Notice period starts only once the exit is approved
+  if (exitReq.status === 'APPROVED') {
+    await prisma.employee.update({ where: { id: params.employeeId }, data: { status: 'NOTICE' } });
+  }
 
   return exitReq;
 }

@@ -1199,7 +1199,19 @@ model ExitRequest {
   approvedLwd          DateTime // Last Working Day approved
   reason               String
   reasonCategory       String   @default("BETTER_OPPORTUNITY") // CAREER, HIGHER_STUDIES, RELOCATION, PERSONAL
-  status               String   @default("INITIATED") // INITIATED, APPROVED, CLEARANCE_IN_PROGRESS, SETTLED, CANCELLED
+  status               String   @default("PENDING_MANAGER") // PENDING_MANAGER, PENDING_HR, APPROVED, REJECTED, WITHDRAWN, SETTLED (legacy: INITIATED)
+  // Two-step approval: reporting manager, then HR
+  managerApproval      String   @default("PENDING") // PENDING, APPROVED, REJECTED, NOT_REQUIRED
+  managerApproverId    String?
+  managerDecidedAt     DateTime?
+  managerNote          String?
+  hrApproval           String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  hrApproverId         String?
+  hrDecidedAt          DateTime?
+  hrNote               String?
+  withdrawnAt          DateTime?
+  withdrawReason       String?
+  withdrawnById        String?
   itClearanceStatus    String   @default("PENDING") // PENDING, CLEARED
   adminClearanceStatus String   @default("PENDING")
   financeClearanceStatus String @default("PENDING")

@@ -15,10 +15,13 @@ export async function POST(
 
     const exitReq = await prisma.exitRequest.findFirst({
       where: { id, tenantId: user.tenantId },
-      select: { id: true, employeeId: true },
+      select: { id: true, employeeId: true, status: true },
     });
     if (!exitReq) {
       return NextResponse.json({ error: 'Exit request not found' }, { status: 404 });
+    }
+    if (!['APPROVED', 'CLEARANCE_IN_PROGRESS'].includes(exitReq.status)) {
+      return NextResponse.json({ error: 'The resignation must be approved by the manager and HR before full & final settlement.' }, { status: 400 });
     }
     // Capability check + no one may calculate their own exit settlement.
     if (!(await canActOnEmployee(user, exitReq.employeeId, 'exit:process'))) {

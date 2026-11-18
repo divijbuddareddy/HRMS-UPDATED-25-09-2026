@@ -1,730 +1,695 @@
-"use client";
+'use client';
 
-import React, { useState, useEffect } from "react";
-import Sidebar from "@/components/Sidebar";
-import { useAuth } from "@/context/AuthContext";
-import {
-  X,
-  Check,
-  Zap,
-  CheckCircle2,
-  Menu,
-  LogOut,
-  Plus,
-  UserMinus,
-  AlertCircle,
-  Building,
-  Users,
-  FileText,
-  Clock,
-  Calendar,
-} from "lucide-react";
+import React, { useEffect, useMemo, useState } from 'react';
+import { format } from 'date-fns';
+import { DashboardLayout } from '@/components/DashboardLayout';
+import { useAuth } from '@/context/AuthContext';
+import { can } from '@/lib/access-policy';
+import { X, LogOut, Check, CheckCircle2, Clock, XCircle, Undo2, Plus, Zap, AlertCircle, UserCheck, Users } from 'lucide-react';
 
-interface ExitRequest {
+type Perms = { canManagerDecide: boolean; canHrDecide: boolean; canWithdraw: boolean; canSettle: boolean };
+type Exit = {
   id: string;
-  resignation_date: string;
-  last_working_day: string;
+  employeeId: string;
+  resignationDate: string;
+  requestedLwd: string;
+  approvedLwd: string;
   reason: string;
-  reasonCategory?: string;
+  reasonCategory: string;
   status: string;
-  notice_period_required: number;
-  notice_period_served: number;
-  notice_shortfall_days: number;
-  it_clearance: string;
-  finance_clearance: string;
-  admin_clearance: string;
-  hr_clearance: string;
+  managerApproval: string;
+  managerDecidedAt: string | null;
+  managerNote: string | null;
+  hrApproval: string;
+  hrDecidedAt: string | null;
+  hrNote: string | null;
+  withdrawnAt: string | null;
+  withdrawReason: string | null;
   employee: {
     id: string;
-    first_name: string;
-    last_name: string;
-    employee_code: string;
-    department: { name: string };
-    designation: { title: string };
-    date_of_joining: string;
+    firstName: string;
+    lastName: string;
+    employeeCode: string;
+    joiningDate: string;
+    noticePeriodDays: number;
+    reportingManagerId: string | null;
+    reportingManager?: { firstName: string; lastName: string } | null;
+    department?: { name: string } | null;
+    designation?: { title: string } | null;
   };
-  fnf_settlement?: {
-    id: string;
-    payable_days: number;
-    earned_salary: number;
-    leave_encashment_amount: number;
-    gratuity_amount: number;
-    notice_recovery_amount: number;
-    net_payable: number;
+  settlement?: {
+    payableDays: number;
+    earnedSalaryAmount: number;
+    leaveEncashmentDays: number;
+    leaveEncashmentAmount: number;
+    noticePayShortfallDays: number;
+    noticeRecoveryAmount: number;
+    gratuityAmount: number;
+    finalSettlementAmount: number;
     status: string;
-    settled_date?: string;
-  };
-}
+    settledAt: string | null;
+  } | null;
+  permissions: Perms;
+};
+
+const REASONS: [string, string][] = [
+  ['BETTER_OPPORTUNITY', 'Better career opportunity'],
+  ['CAREER_CHANGE', 'Higher studies / career change'],
+  ['RELOCATION', 'Personal / relocation'],
+  ['HEALTH_REASONS', 'Health / medical'],
+  ['PERFORMANCE_EXIT', 'Performance separation'],
+  ['MUTUAL_SEPARATION', 'Mutual separation'],
+  ['OTHER', 'Other'],
+];
+const reasonLabel = (k: string) => REASONS.find(([v]) => v === k)?.[1] || k.replace(/_/g, ' ').toLowerCase();
+
+const STATUS: Record<string, { label: string; cls: string }> = {
+  PENDING_MANAGER: { label: 'Waiting for manager', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  PENDING_HR: { label: 'Waiting for HR', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  INITIATED: { label: 'Pending approval', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  APPROVED: { label: 'Approved · serving notice', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  CLEARANCE_IN_PROGRESS: { label: 'Clearance in progress', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  SETTLED: { label: 'Relieved & settled', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  REJECTED: { label: 'Rejected', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+  WITHDRAWN: { label: 'Withdrawn', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
+};
+const OPEN = ['PENDING_MANAGER', 'PENDING_HR', 'INITIATED', 'APPROVED', 'CLEARANCE_IN_PROGRESS'];
+const d = (v?: string | null) => (v ? format(new Date(v), 'dd MMM yyyy') : '—');
+const inr = (n?: number) => `₹${(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+const name = (e: Exit) => `${e.employee.firstName} ${e.employee.lastName}`;
+const isoDay = (offsetDays: number) => format(new Date(Date.now() + offsetDays * 86400000), 'yyyy-MM-dd');
 
 export default function ExitPage() {
   const { user } = useAuth();
-  const [exits, setExits] = useState<ExitRequest[]>([]);
+  const canProcess = can(user, 'exit:process');
+  const [exits, setExits] = useState<Exit[]>([]);
+  const [me, setMe] = useState<string | null>(null);
+  const [isHr, setIsHr] = useState(false);
   const [employees, setEmployees] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedExit, setSelectedExit] = useState<ExitRequest | null>(null);
-  const [calculating, setCalculating] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"ACTIVE" | "SETTLED">("ACTIVE");
+  const [error, setError] = useState<string | null>(null);
 
-  // Modal states for Resignation / Initiating Exit
-  const [isExitModalOpen, setIsExitModalOpen] = useState(false);
-  const [isSelfResignation, setIsSelfResignation] = useState(false);
-  const [submittingExit, setSubmittingExit] = useState(false);
-  const [exitForm, setExitForm] = useState({
-    employeeId: "",
-    requestedLwd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-    reasonCategory: "BETTER_OPPORTUNITY",
-    reason: "",
-  });
+  const [resignOpen, setResignOpen] = useState<null | 'SELF' | 'HR'>(null);
+  const [form, setForm] = useState({ employeeId: '', requestedLwd: isoDay(30), reasonCategory: 'BETTER_OPPORTUNITY', reason: '' });
+  const [decideFor, setDecideFor] = useState<{ exit: Exit; stage: 'MANAGER' | 'HR'; decision: 'APPROVED' | 'REJECTED' } | null>(null);
+  const [decideForm, setDecideForm] = useState({ note: '', approvedLwd: '' });
+  const [fnf, setFnf] = useState<Exit | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const isHRAdmin =
-    user?.roles?.includes("COMPANY_ADMIN") ||
-    user?.roles?.includes("PLATFORM_SUPER_ADMIN") ||
-    user?.roles?.includes("HR_ADMIN");
-
-  const fetchExits = async () => {
+  const load = async () => {
     try {
-      setLoading(true);
-      const [exitsRes, empRes] = await Promise.all([
-        fetch("/api/exit/requests"),
-        fetch("/api/employees"),
-      ]);
-
-      if (exitsRes.ok) {
-        const data = await exitsRes.json();
-        if (data.exits) {
-          const normalized: ExitRequest[] = data.exits.map((e: any) => ({
-            id: e.id,
-            resignation_date: e.resignationDate || e.resignation_date || e.createdAt,
-            last_working_day: e.approvedLwd || e.requestedLwd || e.last_working_day || new Date().toISOString(),
-            reason: e.reason || "Resignation",
-            reasonCategory: e.reasonCategory || "BETTER_OPPORTUNITY",
-            status: e.status || "INITIATED",
-            notice_period_required: e.noticePeriodRequiredDays || e.notice_period_required || 30,
-            notice_period_served: e.noticePeriodServedDays || e.notice_period_served || 30,
-            notice_shortfall_days: e.noticeShortfallDays || e.notice_shortfall_days || 0,
-            it_clearance: e.itClearanceStatus || e.it_clearance || "PENDING",
-            finance_clearance: e.financeClearanceStatus || e.finance_clearance || "PENDING",
-            admin_clearance: e.adminClearanceStatus || e.admin_clearance || "PENDING",
-            hr_clearance: e.hrClearanceStatus || e.hr_clearance || "PENDING",
-            employee: {
-              id: e.employee?.id || "",
-              first_name: e.employee?.firstName || e.employee?.first_name || "Employee",
-              last_name: e.employee?.lastName || e.employee?.last_name || "",
-              employee_code: e.employee?.employeeCode || e.employee?.employee_code || "EMP",
-              department: { name: e.employee?.department?.name || "General" },
-              designation: { title: e.employee?.designation?.title || "Staff" },
-              date_of_joining: e.employee?.joiningDate || e.employee?.date_of_joining || new Date().toISOString(),
-            },
-            fnf_settlement: e.settlement
-              ? {
-                  id: e.settlement.id,
-                  payable_days: e.settlement.payableDays || e.settlement.payable_days || 30,
-                  earned_salary: e.settlement.earnedSalary || e.settlement.earned_salary || 0,
-                  leave_encashment_amount: e.settlement.leaveEncashment || e.settlement.leave_encashment_amount || 0,
-                  gratuity_amount: e.settlement.gratuity || e.settlement.gratuity_amount || 0,
-                  notice_recovery_amount: e.settlement.noticeRecovery || e.settlement.notice_recovery_amount || 0,
-                  net_payable: e.settlement.netSettlement || e.settlement.net_payable || 0,
-                  status: e.settlement.status || "PENDING",
-                  settled_date: e.settlement.settledAt || e.settlement.settled_date,
-                }
-              : undefined,
-          }));
-          setExits(normalized);
-        }
-      }
-
-      if (empRes.ok) {
-        const empData = await empRes.json();
-        setEmployees(empData.employees || []);
-      }
-    } catch (e) {
-      console.error(e);
+      const res = await fetch('/api/exit/requests');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not load resignations');
+      setExits(data.exits || []);
+      setMe(data.me);
+      setIsHr(!!data.isHr);
+      setError(null);
+    } catch (e: any) {
+      setError(e.message);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchExits();
-  }, []);
+    if (!user) return;
+    load();
+    if (can(user, 'employees:manage')) {
+      fetch('/api/employees')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((x) => setEmployees((x?.employees || []).filter((e: any) => !['EXITED', 'ARCHIVED'].includes(e.status))))
+        .catch(() => undefined);
+    }
+  }, [user]);
 
-  const openResignModal = (isSelf: boolean) => {
-    setIsSelfResignation(isSelf);
-    setExitForm({
-      employeeId: isSelf ? user?.employee?.id || "" : (employees[0]?.id || ""),
-      requestedLwd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-      reasonCategory: "BETTER_OPPORTUNITY",
-      reason: "",
-    });
-    setIsExitModalOpen(true);
+  const mine = exits.filter((e) => e.employeeId === me);
+  const myOpen = mine.find((e) => OPEN.includes(e.status));
+  const myHistory = mine.filter((e) => e !== myOpen);
+  const toDecide = exits.filter((e) => e.permissions.canManagerDecide || e.permissions.canHrDecide);
+  const others = useMemo(() => exits.filter((e) => e.employeeId !== me), [exits, me]);
+  const showPipeline = isHr || canProcess || others.length > 0;
+
+  const post = async (url: string, body: any) => {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
   };
 
-  const handleSubmitExit = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!exitForm.employeeId) {
-      alert("Please select an employee");
-      return;
-    }
-    setSubmittingExit(true);
+    setSaving(true);
+    setFormError(null);
     try {
-      const res = await fetch("/api/exit/requests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(exitForm),
+      await post('/api/exit/requests', resignOpen === 'SELF' ? { ...form, employeeId: undefined } : form);
+      setResignOpen(null);
+      await load();
+    } catch (err: any) {
+      setFormError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const decide = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!decideFor) return;
+    if (decideFor.decision === 'REJECTED' && !decideForm.note.trim()) return setFormError('Please give a reason.');
+    setSaving(true);
+    setFormError(null);
+    try {
+      await post(`/api/exit/requests/${decideFor.exit.id}/decision`, {
+        stage: decideFor.stage,
+        decision: decideFor.decision,
+        note: decideForm.note,
+        approvedLwd: decideFor.stage === 'HR' && decideFor.decision === 'APPROVED' ? decideForm.approvedLwd : undefined,
       });
+      setDecideFor(null);
+      await load();
+    } catch (err: any) {
+      setFormError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const withdraw = async (x: Exit) => {
+    const self = x.employeeId === me;
+    const r = prompt(
+      self ? 'Withdraw your resignation? You will continue as an active employee.\n\nReason (optional):' : `Cancel the exit of ${name(x)}? They will return to active status.\n\nReason (optional):`,
+    );
+    if (r === null) return;
+    try {
+      await post(`/api/exit/requests/${x.id}/withdraw`, { reason: r });
+      await load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const calculate = async (x: Exit) => {
+    setSaving(true);
+    try {
+      await post(`/api/exit/requests/${x.id}/calculate`, {});
+      const res = await fetch('/api/exit/requests');
       const data = await res.json();
-      if (res.ok) {
-        alert("Separation / Resignation request successfully submitted and added to the Exit Pipeline!");
-        setIsExitModalOpen(false);
-        await fetchExits();
-      } else {
-        alert(data.error || "Failed to submit exit request");
-      }
-    } catch (e: any) {
-      alert(e.message);
+      setExits(data.exits || []);
+      setFnf((data.exits || []).find((y: Exit) => y.id === x.id) || null);
+    } catch (err: any) {
+      alert(err.message);
     } finally {
-      setSubmittingExit(false);
+      setSaving(false);
     }
   };
 
-  const handleCalculateFnF = async (exitId: string) => {
+  const settle = async (x: Exit) => {
+    if (!confirm(`Approve the full & final payout for ${name(x)} and mark them as relieved? Their login will be deactivated.`)) return;
     try {
-      setCalculating(true);
-      const res = await fetch(`/api/exit/requests/${exitId}/calculate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (res.ok) {
-        await fetchExits();
-        const updatedData = await (await fetch("/api/exit/requests")).json();
-        const found = updatedData.exits?.find((x: any) => x.id === exitId);
-        if (found) {
-          setSelectedExit({
-            ...selectedExit!,
-            fnf_settlement: found.settlement ? {
-              id: found.settlement.id,
-              payable_days: found.settlement.payableDays || 30,
-              earned_salary: found.settlement.earnedSalary || 0,
-              leave_encashment_amount: found.settlement.leaveEncashment || 0,
-              gratuity_amount: found.settlement.gratuity || 0,
-              notice_recovery_amount: found.settlement.noticeRecovery || 0,
-              net_payable: found.settlement.netSettlement || 0,
-              status: found.settlement.status || 'PENDING',
-            } : undefined,
-          });
-        }
-      } else {
-        const d = await res.json();
-        alert(d.error || "Calculation failed");
-      }
-    } catch (e: any) {
-      alert(e.message);
-    } finally {
-      setCalculating(false);
+      await post(`/api/exit/requests/${x.id}/settle`, {});
+      setFnf(null);
+      await load();
+    } catch (err: any) {
+      alert(err.message);
     }
   };
 
-  const handleSettleFnF = async (exitId: string) => {
-    if (!confirm("Approve and execute Full & Final payout for this employee?")) return;
-    try {
-      const res = await fetch(`/api/exit/requests/${exitId}/settle`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (res.ok) {
-        alert("F&F Settlement approved and employee marked as Relieved.");
-        await fetchExits();
-        setSelectedExit(null);
-      } else {
-        const d = await res.json();
-        alert(d.error || "Failed to settle F&F");
-      }
-    } catch (e: any) {
-      alert(e.message);
-    }
+  const openDecide = (exit: Exit, stage: 'MANAGER' | 'HR', decision: 'APPROVED' | 'REJECTED') => {
+    setDecideFor({ exit, stage, decision });
+    setDecideForm({ note: '', approvedLwd: format(new Date(exit.approvedLwd || exit.requestedLwd), 'yyyy-MM-dd') });
+    setFormError(null);
   };
-
-  const filteredExits = exits.filter((e) => {
-    if (activeTab === "ACTIVE") return e.status !== "SETTLED";
-    return e.status === "SETTLED";
-  });
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 antialiased font-sans overflow-hidden">
-      <Sidebar isOpenMobile={mobileMenuOpen} onCloseMobile={() => setMobileMenuOpen(false)} />
-      <div className="flex-1 flex flex-col overflow-y-auto">
-        {/* Header */}
-        <header className="px-4 sm:px-8 py-4 sm:py-5 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setMobileMenuOpen(true)}
-              className="p-2 -ml-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 md:hidden focus:outline-none"
-              title="Open Navigation"
-            >
-              <Menu className="w-6 h-6" />
-            </button>
-            <div>
-              <h1 className="text-lg sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400">
-                Separation & Exit Management
-              </h1>
-              <p className="text-xs text-slate-400 mt-1 hidden sm:block">
-                Employee resignation portal, notice period tracking, clearance checklist & Full and Final (F&F) settlement
-              </p>
-            </div>
-          </div>
+    <DashboardLayout title="Resignation & Exit" subtitle="Resign, get manager and HR approval, withdraw, and full & final settlement">
+      <div className="space-y-6">
+        {error && <div className="p-3 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-800">{error}</div>}
 
-          <div className="flex items-center gap-2">
-            {/* Employee Self-Service Resignation Button */}
-            <button
-              onClick={() => openResignModal(true)}
-              className="px-3.5 py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 font-semibold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-colors"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              Submit Resignation
-            </button>
-
-            {/* HR / Admin Initiate Exit Button */}
-            {isHRAdmin && (
-              <button
-                onClick={() => openResignModal(false)}
-                className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-sm shadow-blue-600/20 flex items-center gap-1.5 transition-all"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Add to Exit Pipeline
-              </button>
-            )}
-          </div>
-        </header>
-
-        <div className="p-4 sm:p-8 space-y-6">
-          {/* Summary KPIs */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-            <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Active in Exit Pipeline</span>
-              <p className="text-3xl font-extrabold text-amber-400 mt-2">
-                {exits.filter((e) => e.status !== "SETTLED").length}
-              </p>
-              <span className="text-xs text-amber-300/80 mt-1 inline-block">Serving notice & in clearance</span>
+        {/* ---------------- My resignation ---------------- */}
+        {user?.employee?.id && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-rose-50 text-rose-600">
+                  <LogOut className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">My Resignation</h3>
+                  <p className="text-xs text-slate-500">Approved by your reporting manager, then HR. You can withdraw it while it is pending.</p>
+                </div>
+              </div>
+              {!myOpen && (
+                <button
+                  onClick={() => {
+                    setForm({ employeeId: '', requestedLwd: isoDay(30), reasonCategory: 'BETTER_OPPORTUNITY', reason: '' });
+                    setFormError(null);
+                    setResignOpen('SELF');
+                  }}
+                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-medium text-xs rounded-xl flex items-center gap-1.5"
+                >
+                  <LogOut className="h-3.5 w-3.5" /> Submit Resignation
+                </button>
+              )}
             </div>
-            <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">In Clearance Queue</span>
-              <p className="text-3xl font-extrabold text-indigo-400 mt-2">
-                {exits.filter((e) => e.status === "INITIATED" || e.status === "CLEARANCE").length}
-              </p>
-              <span className="text-xs text-indigo-300/80 mt-1 inline-block">IT / Finance / HR checks</span>
-            </div>
-            <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">F&F Computation Ready</span>
-              <p className="text-3xl font-extrabold text-blue-400 mt-2">
-                {exits.filter((e) => e.fnf_settlement && e.status !== "SETTLED").length}
-              </p>
-              <span className="text-xs text-blue-300/80 mt-1 inline-block">Statements calculated</span>
-            </div>
-            <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Fully Settled & Relieved</span>
-              <p className="text-3xl font-extrabold text-emerald-400 mt-2">
-                {exits.filter((e) => e.status === "SETTLED").length}
-              </p>
-              <span className="text-xs text-emerald-300/80 mt-1 inline-block">Relieved & Archived</span>
-            </div>
-          </div>
 
-          {/* Filter Tabs */}
-          <div className="flex gap-2 border-b border-slate-800 pb-2">
-            {[
-              { key: "ACTIVE", label: `Active Exit Pipeline (${exits.filter((e) => e.status !== "SETTLED").length})` },
-              { key: "SETTLED", label: `Settled & Relieved (${exits.filter((e) => e.status === "SETTLED").length})` },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key as any)}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                  activeTab === tab.key
-                    ? "bg-blue-600/20 text-blue-400 border border-blue-500/30 shadow-sm"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Exit Records Table */}
-          <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 backdrop-blur-md overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950/80 text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-800">
-                  <tr>
-                    <th className="px-6 py-3.5">Employee</th>
-                    <th className="px-6 py-3.5">Designation & Dept</th>
-                    <th className="px-6 py-3.5">Resigned Date</th>
-                    <th className="px-6 py-3.5">Last Working Day</th>
-                    <th className="px-6 py-3.5">Reason Category</th>
-                    <th className="px-6 py-3.5">Clearances</th>
-                    <th className="px-6 py-3.5">F&F Net Settlement</th>
-                    <th className="px-6 py-3.5">Status</th>
-                    <th className="px-6 py-3.5 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={9} className="px-6 py-12 text-center text-slate-500">
-                        Loading exit cases...
-                      </td>
-                    </tr>
-                  ) : filteredExits.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="px-6 py-12 text-center text-slate-500">
-                        No exit records in this view. Click "Submit Resignation" or "Add to Exit Pipeline" above.
-                      </td>
-                    </tr>
+            {loading ? (
+              <div className="text-xs text-slate-400">Loading…</div>
+            ) : myOpen ? (
+              <div className="space-y-4">
+                <Timeline x={myOpen} />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <Info k="Submitted" v={d(myOpen.resignationDate)} />
+                  <Info k="Requested last day" v={d(myOpen.requestedLwd)} />
+                  <Info k={myOpen.status === 'APPROVED' ? 'Approved last day' : 'Reason'} v={myOpen.status === 'APPROVED' ? d(myOpen.approvedLwd) : reasonLabel(myOpen.reasonCategory)} />
+                </div>
+                <Notes x={myOpen} />
+                <div className="flex justify-end">
+                  {myOpen.permissions.canWithdraw ? (
+                    <button
+                      onClick={() => withdraw(myOpen)}
+                      className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-medium text-xs rounded-xl flex items-center gap-1.5"
+                    >
+                      <Undo2 className="h-3.5 w-3.5" /> Withdraw resignation
+                    </button>
                   ) : (
-                    filteredExits.map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="font-semibold text-slate-100">
-                            {item.employee?.first_name} {item.employee?.last_name}
-                          </div>
-                          <div className="text-[11px] text-slate-500 font-mono">{item.employee?.employee_code}</div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="font-medium text-slate-300">{item.employee?.designation?.title}</div>
-                          <div className="text-[10px] text-slate-500">{item.employee?.department?.name}</div>
-                        </td>
-                        <td className="px-6 py-4 text-slate-400">
-                          {new Date(item.resignation_date).toLocaleDateString("en-IN")}
-                        </td>
-                        <td className="px-6 py-4 text-slate-200 font-medium">
-                          {new Date(item.last_working_day).toLocaleDateString("en-IN")}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
-                            {item.reasonCategory?.replace(/_/g, " ") || "Better Opportunity"}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex gap-1">
-                            <span
-                              title="IT Clearance"
-                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${
-                                item.it_clearance === "CLEARED"
-                                  ? "bg-emerald-950 text-emerald-400 border border-emerald-800"
-                                  : "bg-amber-950 text-amber-400 border border-amber-800"
-                              }`}
-                            >
-                              IT
-                            </span>
-                            <span
-                              title="Finance Clearance"
-                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${
-                                item.finance_clearance === "CLEARED"
-                                  ? "bg-emerald-950 text-emerald-400 border border-emerald-800"
-                                  : "bg-amber-950 text-amber-400 border border-amber-800"
-                              }`}
-                            >
-                              FN
-                            </span>
-                            <span
-                              title="Admin Clearance"
-                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${
-                                item.admin_clearance === "CLEARED"
-                                  ? "bg-emerald-950 text-emerald-400 border border-emerald-800"
-                                  : "bg-amber-950 text-amber-400 border border-amber-800"
-                              }`}
-                            >
-                              AD
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          {item.fnf_settlement ? (
-                            <div>
-                              <div className="font-bold text-emerald-400 text-sm">
-                                ₹{item.fnf_settlement.net_payable?.toLocaleString("en-IN")}
-                              </div>
-                              <div className="text-[10px] text-slate-500">
-                                Status: {item.fnf_settlement.status}
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-slate-500 italic text-[11px]">Not Calculated</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span
-                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase ${
-                              item.status === "SETTLED"
-                                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                : item.status === "FNF_PENDING"
-                                ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                                : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                            }`}
-                          >
-                            {item.status}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-right space-x-2">
-                          <button
-                            onClick={() => setSelectedExit(item)}
-                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs transition"
-                          >
-                            F&F Statement
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                    <span className="text-[11px] text-slate-500">Approved — to withdraw now, please ask HR to cancel it.</span>
                   )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Resignation / Add to Exit Pipeline Modal */}
-      {isExitModalOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 text-slate-200">
-            <div className="flex justify-between items-start border-b border-slate-800 pb-3">
-              <div>
-                <h3 className="font-bold text-base text-white flex items-center gap-2">
-                  <LogOut className="h-5 w-5 text-rose-400" />
-                  {isSelfResignation ? "Submit Resignation" : "Initiate Employee Exit & Add to Pipeline"}
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {isSelfResignation
-                    ? "Submit your formal resignation notice to your manager & HR"
-                    : "Add an employee into the official separation, clearance, and F&F settlement pipeline"}
-                </p>
-              </div>
-              <button
-                onClick={() => setIsExitModalOpen(false)}
-                className="p-1.5 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitExit} className="space-y-4 text-xs">
-              {/* Employee Selector */}
-              <div>
-                <label className="font-medium text-slate-300 block mb-1">Employee *</label>
-                {isSelfResignation ? (
-                  <input
-                    type="text"
-                    disabled
-                    value={`${user?.employee?.displayName || user?.employee?.firstName || user?.email || "Current User"} (${user?.email})`}
-                    className="w-full p-2.5 bg-slate-800/60 border border-slate-700 rounded-xl text-slate-400 font-medium"
-                  />
-                ) : (
-                  <select
-                    required
-                    value={exitForm.employeeId}
-                    onChange={(e) => setExitForm({ ...exitForm, employeeId: e.target.value })}
-                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="">-- Select Employee to Exit --</option>
-                    {employees.map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.firstName} {emp.lastName} ({emp.employeeCode}) • {emp.department?.name || "General"}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              {/* Requested Last Working Day */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-medium text-slate-300 block mb-1">Reason Category *</label>
-                  <select
-                    value={exitForm.reasonCategory}
-                    onChange={(e) => setExitForm({ ...exitForm, reasonCategory: e.target.value })}
-                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="BETTER_OPPORTUNITY">Better Career Opportunity</option>
-                    <option value="CAREER_CHANGE">Higher Studies / Career Change</option>
-                    <option value="RELOCATION">Personal / Relocation</option>
-                    <option value="HEALTH_REASONS">Health / Medical</option>
-                    <option value="PERFORMANCE_EXIT">Performance Separation</option>
-                    <option value="MUTUAL_SEPARATION">Mutual Separation Agreement</option>
-                    <option value="OTHER">Other Reason</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="font-medium text-slate-300 block mb-1">Requested Last Working Day *</label>
-                  <input
-                    type="date"
-                    required
-                    value={exitForm.requestedLwd}
-                    onChange={(e) => setExitForm({ ...exitForm, requestedLwd: e.target.value })}
-                    className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
-              {/* Reason / Remarks */}
-              <div>
-                <label className="font-medium text-slate-300 block mb-1">Detailed Reason & Transition Remarks</label>
-                <textarea
-                  rows={3}
-                  required
-                  placeholder="Provide context on transition handover, knowledge transfer, or feedback..."
-                  value={exitForm.reason}
-                  onChange={(e) => setExitForm({ ...exitForm, reason: e.target.value })}
-                  className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsExitModalOpen(false)}
-                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-medium hover:bg-slate-700 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingExit}
-                  className="px-5 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-600/20 flex items-center gap-1.5 transition-all"
-                >
-                  {submittingExit ? "Submitting..." : isSelfResignation ? "Confirm Resignation" : "Initiate Exit Pipeline"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* F&F Settlement Statement Modal */}
-      {selectedExit && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-200">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <div>
-                <h3 className="text-lg font-bold text-slate-100">Full & Final Settlement Worksheet</h3>
-                <p className="text-xs text-slate-400">
-                  {selectedExit.employee?.first_name} {selectedExit.employee?.last_name} ({selectedExit.employee?.employee_code})
-                </p>
-              </div>
-              <button
-                onClick={() => setSelectedExit(null)}
-                className="p-1.5 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Employee Tenure & Resignation Detail */}
-            <div className="grid grid-cols-2 gap-3 bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 text-xs">
-              <div>
-                <span className="text-slate-500 block">Date of Joining:</span>
-                <span className="text-slate-200 font-medium">
-                  {new Date(selectedExit.employee?.date_of_joining).toLocaleDateString("en-IN")}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-500 block">Last Working Date:</span>
-                <span className="text-slate-200 font-medium">
-                  {new Date(selectedExit.last_working_day).toLocaleDateString("en-IN")}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-500 block">Notice Required vs Served:</span>
-                <span className="text-slate-200 font-medium">
-                  {selectedExit.notice_period_required}d required / {selectedExit.notice_period_served}d served
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-500 block">Notice Shortfall:</span>
-                <span
-                  className={`font-semibold ${
-                    selectedExit.notice_shortfall_days > 0 ? "text-rose-400" : "text-emerald-400"
-                  }`}
-                >
-                  {selectedExit.notice_shortfall_days} days
-                </span>
-              </div>
-            </div>
-
-            {/* Settlement Breakdown Sheet */}
-            {selectedExit.fnf_settlement ? (
-              <div className="space-y-2 text-xs">
-                <h4 className="font-semibold text-slate-300 uppercase tracking-wider text-[11px]">
-                  Computation Breakdown
-                </h4>
-                <div className="border border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-800/60 bg-slate-950/40">
-                  <div className="flex justify-between p-3">
-                    <span className="text-slate-400">Earned Salary (Prorated for {selectedExit.fnf_settlement.payable_days} days):</span>
-                    <span className="font-semibold text-slate-200">
-                      ₹{selectedExit.fnf_settlement.earned_salary?.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                  <div className="flex justify-between p-3">
-                    <span className="text-slate-400">Leave Balance Encashment (Earned/Paid Leave):</span>
-                    <span className="font-semibold text-emerald-400">
-                      + ₹{selectedExit.fnf_settlement.leave_encashment_amount?.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                  <div className="flex justify-between p-3">
-                    <span className="text-slate-400">Statutory Gratuity (Payment of Gratuity Act 1972):</span>
-                    <span className="font-semibold text-emerald-400">
-                      + ₹{selectedExit.fnf_settlement.gratuity_amount?.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                  <div className="flex justify-between p-3 bg-rose-950/20">
-                    <span className="text-rose-300">Notice Period Recovery (Shortfall Deduction):</span>
-                    <span className="font-semibold text-rose-400">
-                      - ₹{selectedExit.fnf_settlement.notice_recovery_amount?.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                  <div className="flex justify-between p-3 bg-indigo-950/40 text-sm">
-                    <span className="font-bold text-white">Net Final Settlement Payout:</span>
-                    <span className="font-extrabold text-emerald-400">
-                      ₹{selectedExit.fnf_settlement.net_payable?.toLocaleString("en-IN")}
-                    </span>
-                  </div>
                 </div>
               </div>
             ) : (
-              <div className="p-6 text-center bg-slate-950/50 rounded-xl border border-slate-800">
-                <p className="text-xs text-slate-400 mb-3">
-                  Click below to trigger automated F&F computation engine (bridges leave ledger, salary structure, and gratuity rules).
-                </p>
+              <div className="text-xs text-slate-400">You have no open resignation.</div>
+            )}
+
+            {myHistory.length > 0 && (
+              <div className="border-t border-slate-100 pt-3 space-y-1.5">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase">History</div>
+                {myHistory.map((x) => (
+                  <div key={x.id} className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    <Chip s={x.status} /> submitted {d(x.resignationDate)}
+                    {x.status === 'WITHDRAWN' && x.withdrawnAt && <> · withdrawn {d(x.withdrawnAt)}</>}
+                    {x.status === 'REJECTED' && (x.hrNote || x.managerNote) && <> · “{x.hrNote || x.managerNote}”</>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ---------------- Awaiting my approval ---------------- */}
+        {toDecide.length > 0 && (
+          <div className="bg-white rounded-2xl border border-amber-200 shadow-sm p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-amber-50 text-amber-600">
+                <UserCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">Waiting for your approval ({toDecide.length})</h3>
+                <p className="text-xs text-slate-500">Resignations from your team (as manager) or company-wide (as HR)</p>
+              </div>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {toDecide.map((x) => {
+                const stage = x.permissions.canManagerDecide ? 'MANAGER' : 'HR';
+                return (
+                  <div key={x.id} className="py-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div className="text-xs">
+                      <div className="font-semibold text-slate-900">
+                        {name(x)} <span className="font-normal text-slate-400 font-mono">({x.employee.employeeCode})</span>
+                      </div>
+                      <div className="text-slate-500">
+                        {[x.employee.designation?.title, x.employee.department?.name].filter(Boolean).join(' · ')} · submitted {d(x.resignationDate)} · wants last day{' '}
+                        <strong>{d(x.requestedLwd)}</strong>
+                      </div>
+                      <div className="text-slate-600 italic mt-0.5">
+                        {reasonLabel(x.reasonCategory)} — “{x.reason}”
+                      </div>
+                      {stage === 'HR' && x.managerApproval === 'APPROVED' && (
+                        <div className="text-[11px] text-emerald-700 mt-0.5">
+                          ✓ Manager approved{x.managerNote ? `: “${x.managerNote}”` : ''}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[10px] text-slate-400 uppercase">{stage === 'MANAGER' ? 'Manager step' : 'HR final step'}</span>
+                      <button onClick={() => openDecide(x, stage, 'APPROVED')} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg">
+                        Approve
+                      </button>
+                      <button onClick={() => openDecide(x, stage, 'REJECTED')} className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium text-xs rounded-lg border border-rose-200">
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ---------------- Pipeline (managers: team; HR: everyone) ---------------- */}
+        {showPipeline && (
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                <Users className="h-4 w-4 text-slate-500" /> {isHr || canProcess ? 'All resignations & exits' : 'My team’s resignations'}
+              </h3>
+              {(isHr || canProcess) && (
                 <button
-                  disabled={calculating}
-                  onClick={() => handleCalculateFnF(selectedExit.id)}
-                  className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium rounded-xl text-xs shadow-md transition flex items-center gap-1.5 mx-auto"
+                  onClick={() => {
+                    setForm({ employeeId: '', requestedLwd: isoDay(30), reasonCategory: 'MUTUAL_SEPARATION', reason: '' });
+                    setFormError(null);
+                    setResignOpen('HR');
+                  }}
+                  className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs rounded-xl flex items-center gap-1.5"
                 >
-                  <Zap className="h-4 w-4" />
-                  {calculating ? "Calculating..." : "Run Automated F&F Engine"}
+                  <Plus className="h-3.5 w-3.5" /> Initiate exit for an employee
+                </button>
+              )}
+            </div>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-semibold">
+                    <tr>
+                      <th className="py-3 px-4">Employee</th>
+                      <th className="py-3 px-4">Submitted</th>
+                      <th className="py-3 px-4">Last working day</th>
+                      <th className="py-3 px-4">Manager</th>
+                      <th className="py-3 px-4">HR</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {others.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-slate-400">No resignations.</td>
+                      </tr>
+                    ) : (
+                      others.map((x) => (
+                        <tr key={x.id} className="hover:bg-slate-50/70">
+                          <td className="py-3 px-4">
+                            <div className="font-medium text-slate-900">{name(x)}</div>
+                            <div className="text-[11px] text-slate-400">
+                              {x.employee.employeeCode}
+                              {x.employee.designation?.title ? ` · ${x.employee.designation.title}` : ''}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-slate-600">{d(x.resignationDate)}</td>
+                          <td className="py-3 px-4 text-slate-800">{d(x.status === 'APPROVED' || x.status === 'SETTLED' ? x.approvedLwd : x.requestedLwd)}</td>
+                          <td className="py-3 px-4"><StepChip v={x.managerApproval} /></td>
+                          <td className="py-3 px-4"><StepChip v={x.hrApproval} /></td>
+                          <td className="py-3 px-4"><Chip s={x.status} /></td>
+                          <td className="py-3 px-4 text-right whitespace-nowrap space-x-1.5">
+                            {x.permissions.canWithdraw && (
+                              <button onClick={() => withdraw(x)} className="px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-lg font-medium">
+                                Cancel exit
+                              </button>
+                            )}
+                            {(x.permissions.canSettle || x.status === 'SETTLED') && canProcess && (
+                              <button onClick={() => setFnf(x)} className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium">
+                                F&amp;F
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Submit / initiate */}
+      {resignOpen && (
+        <Modal title={resignOpen === 'SELF' ? 'Submit resignation' : 'Initiate exit for an employee'} onClose={() => setResignOpen(null)}>
+          <form onSubmit={submit} className="space-y-3 text-xs">
+            {resignOpen === 'HR' ? (
+              <Field label="Employee *">
+                <select required value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} className="inp">
+                  <option value="">Select an employee…</option>
+                  {employees
+                    .filter((e) => e.id !== me)
+                    .map((e) => (
+                      <option key={e.id} value={e.id}>{e.firstName} {e.lastName} ({e.employeeCode})</option>
+                    ))}
+                </select>
+                <p className="text-[10px] text-slate-400 mt-1">An exit started by HR is approved immediately (no manager step).</p>
+              </Field>
+            ) : (
+              <p className="text-slate-500">Your resignation goes to your reporting manager first, then HR. You can withdraw it until it is approved.</p>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Reason *">
+                <select value={form.reasonCategory} onChange={(e) => setForm({ ...form, reasonCategory: e.target.value })} className="inp">
+                  {REASONS.map(([k, l]) => (
+                    <option key={k} value={k}>{l}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Requested last working day *">
+                <input type="date" required min={isoDay(0)} value={form.requestedLwd} onChange={(e) => setForm({ ...form, requestedLwd: e.target.value })} className="inp" />
+              </Field>
+            </div>
+            <Field label="Details *">
+              <textarea required rows={3} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} className="inp" placeholder="Reason, handover plan, anything HR should know" />
+            </Field>
+            {formError && <Err msg={formError} />}
+            <Buttons saving={saving} danger label={resignOpen === 'SELF' ? 'Submit resignation' : 'Initiate exit'} onCancel={() => setResignOpen(null)} />
+          </form>
+        </Modal>
+      )}
+
+      {/* Approve / reject */}
+      {decideFor && (
+        <Modal
+          title={`${decideFor.decision === 'APPROVED' ? 'Approve' : 'Reject'} resignation — ${name(decideFor.exit)}`}
+          onClose={() => setDecideFor(null)}
+        >
+          <form onSubmit={decide} className="space-y-3 text-xs">
+            <p className="text-slate-500">
+              {decideFor.stage === 'MANAGER'
+                ? decideFor.decision === 'APPROVED'
+                  ? 'As reporting manager. After your approval it goes to HR for the final approval.'
+                  : 'As reporting manager. The employee will see your reason.'
+                : decideFor.decision === 'APPROVED'
+                ? 'Final HR approval. The notice period starts and the employee works until the last working day below.'
+                : 'Final HR decision. The employee will see your reason.'}
+            </p>
+            {decideFor.stage === 'HR' && decideFor.decision === 'APPROVED' && (
+              <Field label="Approved last working day">
+                <input type="date" required value={decideForm.approvedLwd} onChange={(e) => setDecideForm({ ...decideForm, approvedLwd: e.target.value })} className="inp" />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Requested: {d(decideFor.exit.requestedLwd)} · Notice period: {decideFor.exit.employee.noticePeriodDays} days
+                </p>
+              </Field>
+            )}
+            <Field label={decideFor.decision === 'REJECTED' ? 'Reason *' : 'Note (optional)'}>
+              <textarea rows={2} required={decideFor.decision === 'REJECTED'} value={decideForm.note} onChange={(e) => setDecideForm({ ...decideForm, note: e.target.value })} className="inp" />
+            </Field>
+            {formError && <Err msg={formError} />}
+            <Buttons saving={saving} danger={decideFor.decision === 'REJECTED'} label={decideFor.decision === 'APPROVED' ? 'Approve' : 'Reject'} onCancel={() => setDecideFor(null)} />
+          </form>
+        </Modal>
+      )}
+
+      {/* Full & final */}
+      {fnf && (
+        <Modal title={`Full & final settlement — ${name(fnf)}`} onClose={() => setFnf(null)} wide>
+          <div className="space-y-4 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Info k="Joined" v={d(fnf.employee.joiningDate)} />
+              <Info k="Last working day" v={d(fnf.approvedLwd)} />
+              <Info k="Notice period" v={`${fnf.employee.noticePeriodDays} days`} />
+              <Info k="Status" v={<Chip s={fnf.status} />} />
+            </div>
+            {fnf.settlement ? (
+              <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
+                <Line k={`Earned salary (${fnf.settlement.payableDays} days)`} v={inr(fnf.settlement.earnedSalaryAmount)} />
+                <Line k={`Leave encashment (${fnf.settlement.leaveEncashmentDays} days)`} v={`+ ${inr(fnf.settlement.leaveEncashmentAmount)}`} tone="text-emerald-700" />
+                <Line k="Gratuity" v={`+ ${inr(fnf.settlement.gratuityAmount)}`} tone="text-emerald-700" />
+                <Line k={`Notice recovery (${fnf.settlement.noticePayShortfallDays} days short)`} v={`− ${inr(fnf.settlement.noticeRecoveryAmount)}`} tone="text-rose-700" />
+                <Line k="Net final settlement" v={inr(fnf.settlement.finalSettlementAmount)} bold />
+              </div>
+            ) : (
+              <div className="p-5 text-center bg-slate-50 rounded-xl border border-slate-200">
+                <p className="text-slate-500 mb-3">Calculate the settlement from salary, leave balance, gratuity and notice served.</p>
+                <button disabled={saving} onClick={() => calculate(fnf)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-medium inline-flex items-center gap-1.5">
+                  <Zap className="h-4 w-4" /> {saving ? 'Calculating…' : 'Calculate F&F'}
                 </button>
               </div>
             )}
-
-            {/* Settlement Action */}
-            <div className="flex gap-2 pt-2 border-t border-slate-800">
-              {selectedExit.fnf_settlement && selectedExit.status !== "SETTLED" && (
-                <button
-                  onClick={() => handleSettleFnF(selectedExit.id)}
-                  className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-1.5"
-                >
-                  <Check className="h-4 w-4" /> Approve Payout & Mark Employee as Relieved
+            <div className="flex justify-end gap-2">
+              {fnf.settlement && fnf.status !== 'SETTLED' && (
+                <button onClick={() => calculate(fnf)} disabled={saving} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium">
+                  Recalculate
                 </button>
               )}
-              {selectedExit.status === "SETTLED" && (
-                <div className="flex-1 p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-center text-xs text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400" /> Full and Final Settlement Executed & Relieving Letter Dispatched
-                </div>
+              {fnf.settlement && fnf.status !== 'SETTLED' && (
+                <button onClick={() => settle(fnf)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium inline-flex items-center gap-1.5">
+                  <Check className="h-4 w-4" /> Approve payout & relieve
+                </button>
+              )}
+              {fnf.status === 'SETTLED' && (
+                <span className="text-emerald-700 font-semibold inline-flex items-center gap-1">
+                  <CheckCircle2 className="h-4 w-4" /> Settled {d(fnf.settlement?.settledAt)}
+                </span>
               )}
             </div>
           </div>
-        </div>
+        </Modal>
       )}
+
+      <style>{`.inp{width:100%;padding:.5rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:.5rem}`}</style>
+    </DashboardLayout>
+  );
+}
+
+function Timeline({ x }: { x: Exit }) {
+  const mgrState = x.managerApproval;
+  const steps: { label: string; sub: string; state: 'done' | 'current' | 'todo' | 'bad' | 'skip' }[] = [
+    { label: 'Submitted', sub: d(x.resignationDate), state: 'done' },
+    {
+      label: 'Manager approval',
+      sub:
+        mgrState === 'NOT_REQUIRED'
+          ? 'Not required'
+          : x.employee.reportingManager
+          ? `${x.employee.reportingManager.firstName} ${x.employee.reportingManager.lastName}`
+          : 'Reporting manager',
+      state: mgrState === 'APPROVED' ? 'done' : mgrState === 'REJECTED' ? 'bad' : mgrState === 'NOT_REQUIRED' ? 'skip' : 'current',
+    },
+    {
+      label: 'HR approval',
+      sub: x.hrApproval === 'APPROVED' ? d(x.hrDecidedAt) : 'HR',
+      state: x.hrApproval === 'APPROVED' ? 'done' : x.hrApproval === 'REJECTED' ? 'bad' : x.status === 'PENDING_HR' ? 'current' : 'todo',
+    },
+    {
+      label: 'Notice period',
+      sub: x.status === 'APPROVED' || x.status === 'SETTLED' ? `until ${d(x.approvedLwd)}` : '—',
+      state: x.status === 'SETTLED' ? 'done' : x.status === 'APPROVED' ? 'current' : 'todo',
+    },
+    { label: 'Relieved', sub: x.status === 'SETTLED' ? 'Done' : '—', state: x.status === 'SETTLED' ? 'done' : 'todo' },
+  ];
+  const dot: Record<string, string> = {
+    done: 'bg-emerald-500 text-white',
+    current: 'bg-amber-400 text-white',
+    todo: 'bg-slate-200 text-slate-500',
+    bad: 'bg-rose-500 text-white',
+    skip: 'bg-slate-300 text-white',
+  };
+  return (
+    <div className="flex flex-wrap gap-y-3">
+      {steps.map((s, i) => (
+        <div key={s.label} className="flex items-center">
+          <div className="flex items-center gap-2">
+            <span className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold ${dot[s.state]}`}>
+              {s.state === 'done' ? <Check className="h-3.5 w-3.5" /> : s.state === 'bad' ? <XCircle className="h-3.5 w-3.5" /> : s.state === 'current' ? <Clock className="h-3.5 w-3.5" /> : i + 1}
+            </span>
+            <div className="text-xs leading-tight">
+              <div className="font-semibold text-slate-800">{s.label}</div>
+              <div className="text-[10px] text-slate-500">{s.sub}</div>
+            </div>
+          </div>
+          {i < steps.length - 1 && <div className="w-6 sm:w-10 h-px bg-slate-300 mx-2" />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Notes({ x }: { x: Exit }) {
+  const items = [
+    x.managerNote && { who: 'Manager', text: x.managerNote, bad: x.managerApproval === 'REJECTED' },
+    x.hrNote && { who: 'HR', text: x.hrNote, bad: x.hrApproval === 'REJECTED' },
+  ].filter(Boolean) as { who: string; text: string; bad: boolean }[];
+  if (!items.length) return null;
+  return (
+    <div className="space-y-1">
+      {items.map((n) => (
+        <div key={n.who} className={`text-[11px] p-2 rounded-lg border ${n.bad ? 'bg-rose-50 border-rose-100 text-rose-700' : 'bg-slate-50 border-slate-100 text-slate-600'}`}>
+          <strong>{n.who}:</strong> {n.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Chip({ s }: { s: string }) {
+  const st = STATUS[s] || { label: s, cls: 'bg-slate-100 text-slate-600 border-slate-200' };
+  return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border ${st.cls}`}>{st.label}</span>;
+}
+
+function StepChip({ v }: { v: string }) {
+  if (v === 'APPROVED') return <span className="text-emerald-700 font-semibold inline-flex items-center gap-1"><Check className="h-3 w-3" /> Approved</span>;
+  if (v === 'REJECTED') return <span className="text-rose-700 font-semibold">Rejected</span>;
+  if (v === 'NOT_REQUIRED') return <span className="text-slate-400">Not required</span>;
+  return <span className="text-amber-700">Pending</span>;
+}
+
+function Info({ k, v }: { k: string; v: React.ReactNode }) {
+  return (
+    <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-100">
+      <div className="text-[10px] text-slate-500 uppercase">{k}</div>
+      <div className="text-slate-800 font-medium mt-0.5">{v}</div>
+    </div>
+  );
+}
+
+function Line({ k, v, tone = 'text-slate-800', bold }: { k: string; v: string; tone?: string; bold?: boolean }) {
+  return (
+    <div className={`flex justify-between p-3 ${bold ? 'bg-slate-50 text-sm' : ''}`}>
+      <span className={bold ? 'font-bold text-slate-900' : 'text-slate-600'}>{k}</span>
+      <span className={`${bold ? 'font-extrabold text-emerald-700' : `font-semibold ${tone}`}`}>{v}</span>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="font-medium text-slate-700 block mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function Err({ msg }: { msg: string }) {
+  return (
+    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 flex items-center gap-1.5">
+      <AlertCircle className="h-4 w-4 shrink-0" /> {msg}
+    </div>
+  );
+}
+
+function Buttons({ saving, label, onCancel, danger }: { saving: boolean; label: string; onCancel: () => void; danger?: boolean }) {
+  return (
+    <div className="flex justify-end gap-2 pt-2">
+      <button type="button" onClick={onCancel} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-medium">Cancel</button>
+      <button type="submit" disabled={saving} className={`px-5 py-2 ${danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'} disabled:opacity-50 text-white rounded-xl font-medium`}>
+        {saving ? 'Saving…' : label}
+      </button>
+    </div>
+  );
+}
+
+function Modal({ title, onClose, wide, children }: { title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div className={`bg-white rounded-2xl ${wide ? 'max-w-2xl' : 'max-w-md'} w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto`}>
+        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+          <h3 className="font-semibold text-slate-900 text-base flex items-center gap-2">
+            <LogOut className="h-5 w-5 text-rose-600" /> {title}
+          </h3>
+          <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        {children}
+      </div>
     </div>
   );
 }
