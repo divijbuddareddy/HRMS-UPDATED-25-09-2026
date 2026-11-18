@@ -121,6 +121,19 @@ export default function DocumentsPage() {
     fetchData();
   }, []);
 
+  // A file dropped outside a drop zone would make the browser open it and leave the page.
+  useEffect(() => {
+    const block = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
+    };
+    window.addEventListener('dragover', block);
+    window.addEventListener('drop', block);
+    return () => {
+      window.removeEventListener('dragover', block);
+      window.removeEventListener('drop', block);
+    };
+  }, []);
+
   // Sync employee details when employee dropdown changes
   useEffect(() => {
     if (selectedEmployeeId) {
@@ -205,9 +218,28 @@ export default function DocumentsPage() {
   };
 
   // Handle file selection for upload offer letter
+  // Drag & drop state for the two drop zones
+  const [dragOverOffer, setDragOverOffer] = useState(false);
+  const [dragOverSign, setDragOverSign] = useState(false);
+
+  const OFFER_EXT = /\.(pdf|png|jpe?g|docx?|txt)$/i;
+  const MAX_OFFER_BYTES = 10 * 1024 * 1024;
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    processOfferFile(e.target.files?.[0]);
+    e.target.value = '';
+  };
+
+  const processOfferFile = (file?: File | null) => {
     if (!file) return;
+    if (!OFFER_EXT.test(file.name)) {
+      alert('Please choose a PDF, Word (DOC/DOCX), PNG, JPG or TXT file.');
+      return;
+    }
+    if (file.size > MAX_OFFER_BYTES) {
+      alert('File is larger than 10 MB. Please upload a smaller file.');
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -226,8 +258,20 @@ export default function DocumentsPage() {
 
   // Handle upload signature image
   const handleSignatureImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    processSignatureFile(e.target.files?.[0]);
+    e.target.value = '';
+  };
+
+  const processSignatureFile = (file?: File | null) => {
     if (!file) return;
+    if (!/^image\/(png|jpe?g|gif|webp)$/i.test(file.type)) {
+      alert('Please choose a PNG or JPG image of your signature.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      alert('Signature image is larger than 2 MB. Please use a smaller image.');
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -235,6 +279,33 @@ export default function DocumentsPage() {
     };
     reader.readAsDataURL(file);
   };
+
+  // Shared drag & drop handlers: keep the browser from opening the dropped file,
+  // highlight the zone while dragging, and hand the first file to the processor.
+  const dropZone = (setOver: (v: boolean) => void, onFile: (f?: File | null) => void) => ({
+    onDragEnter: (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setOver(true);
+    },
+    onDragOver: (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+      setOver(true);
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false);
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setOver(false);
+      onFile(e.dataTransfer.files?.[0]);
+    },
+  });
 
   // Generate signature data URL
   const generateSignaturePayload = (): string => {
@@ -904,9 +975,18 @@ export default function DocumentsPage() {
                         </button>
                       </div>
                     ) : (
-                      <label className="border-2 border-dashed border-slate-300 hover:border-emerald-500 bg-slate-50 hover:bg-emerald-50/20 rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all text-center">
-                        <Upload className="h-8 w-8 text-slate-400 mb-2" />
-                        <span className="text-xs font-bold text-slate-700">Click to browse or drag & drop Offer Letter file</span>
+                      <label
+                        {...dropZone(setDragOverOffer, processOfferFile)}
+                        className={`border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all text-center ${
+                          dragOverOffer
+                            ? 'border-emerald-500 bg-emerald-50 ring-4 ring-emerald-100'
+                            : 'border-slate-300 hover:border-emerald-500 bg-slate-50 hover:bg-emerald-50/20'
+                        }`}
+                      >
+                        <Upload className={`h-8 w-8 mb-2 ${dragOverOffer ? 'text-emerald-600' : 'text-slate-400'}`} />
+                        <span className="text-xs font-bold text-slate-700">
+                          {dragOverOffer ? 'Drop the file here' : 'Click to browse or drag & drop Offer Letter file'}
+                        </span>
                         <span className="text-[11px] text-slate-400 mt-1">Supports PDF, DOCX, PNG, JPG up to 10MB</span>
                         <input
                           type="file"
@@ -1353,9 +1433,16 @@ export default function DocumentsPage() {
                                   </button>
                                 </div>
                               ) : (
-                                <label className="border-2 border-dashed border-slate-300 hover:border-emerald-500 bg-white rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer text-center">
-                                  <ImageIcon className="h-6 w-6 text-slate-400 mb-1" />
-                                  <span className="text-xs text-slate-600 font-semibold">Click to upload signature scan</span>
+                                <label
+                                  {...dropZone(setDragOverSign, processSignatureFile)}
+                                  className={`border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer text-center transition-all ${
+                                    dragOverSign ? 'border-emerald-500 bg-emerald-50 ring-4 ring-emerald-100' : 'border-slate-300 hover:border-emerald-500 bg-white'
+                                  }`}
+                                >
+                                  <ImageIcon className={`h-6 w-6 mb-1 ${dragOverSign ? 'text-emerald-600' : 'text-slate-400'}`} />
+                                  <span className="text-xs text-slate-600 font-semibold">
+                                    {dragOverSign ? 'Drop the image here' : 'Click to upload or drag & drop your signature image'}
+                                  </span>
                                   <input
                                     type="file"
                                     accept="image/*"
