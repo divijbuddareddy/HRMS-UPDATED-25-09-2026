@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { OnboardingReminder } from './OnboardingReminder';
 import { useAuth } from '@/context/AuthContext';
 
 interface DashboardLayoutProps {
@@ -47,6 +48,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
         />
         <main className="flex-1 p-3 sm:p-6 overflow-y-auto max-w-7xl w-full mx-auto">
+          <OnboardingReminder />
           {children}
         </main>
       </div>

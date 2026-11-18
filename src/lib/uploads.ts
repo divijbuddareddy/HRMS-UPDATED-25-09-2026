@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import crypto from 'crypto';
 import { AuthUser } from './types';
 import { canCompanyWide } from './access-policy';
+import { prisma } from './prisma';
 
 /** Where uploaded files live. Kept outside the app folder so deploys never touch them. */
 export const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
@@ -86,4 +87,23 @@ function resolveKey(storageKey: string) {
 export function cleanFileName(name: string, ext: string) {
   const base = (name || 'document').replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9 _.-]+/g, '_').trim().slice(0, 80) || 'document';
   return `${base}.${ext}`;
+}
+
+/**
+ * Required onboarding documents the employee still has to (re)upload: never uploaded, or the latest
+ * upload was rejected by HR. Empty when everything required is uploaded (verified or awaiting HR).
+ */
+export async function missingOnboardingDocs(tenantId: string, employeeId: string) {
+  const uploads = await prisma.employeeUpload.findMany({
+    where: { tenantId, employeeId, docType: { in: REQUIRED_DOC_TYPES as unknown as string[] } },
+    select: { docType: true, status: true, reviewNote: true, createdAt: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  const result: { key: string; label: string; reason: 'MISSING' | 'REJECTED'; note?: string | null }[] = [];
+  for (const t of DOC_TYPES.filter((d) => d.required)) {
+    const latest = uploads.find((u) => u.docType === t.key);
+    if (!latest) result.push({ key: t.key, label: t.label, reason: 'MISSING' });
+    else if (latest.status === 'REJECTED') result.push({ key: t.key, label: t.label, reason: 'REJECTED', note: latest.reviewNote });
+  }
+  return result;
 }

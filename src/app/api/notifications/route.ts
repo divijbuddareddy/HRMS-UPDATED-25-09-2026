@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthUserFromRequest } from '@/lib/auth';
 import { can, canCompanyWide, employeeIdFilter, visibleEmployeeIds } from '@/lib/access';
+import { missingOnboardingDocs } from '@/lib/uploads';
+import { isHrApprover } from '@/lib/exit/approval';
 
 export async function GET(req: NextRequest) {
   try {
@@ -45,6 +47,30 @@ export async function GET(req: NextRequest) {
         createdAt: n.createdAt,
       });
     });
+
+    // Onboarding documents still missing / rejected: a reminder that stays until they are uploaded
+    let pinned: (typeof alerts)[number] | null = null;
+    if (user.employeeId) {
+      const missing = await missingOnboardingDocs(user.tenantId, user.employeeId);
+      if (missing.length) {
+        const rejected = missing.filter((m) => m.reason === 'REJECTED');
+        const notUploaded = missing.filter((m) => m.reason === 'MISSING');
+        const parts = [
+          notUploaded.length ? `Please upload: ${notUploaded.map((m) => m.label).join(', ')}.` : '',
+          rejected.length ? `Re-upload (rejected by HR): ${rejected.map((m) => m.label).join(', ')}.` : '',
+        ].filter(Boolean);
+        pinned = {
+          id: 'onboarding-docs',
+          title: 'Onboarding documents pending',
+          message: parts.join(' '),
+          type: 'ALERT',
+          category: 'SYSTEM',
+          link: '/my-onboarding',
+          isRead: false,
+          createdAt: new Date(),
+        };
+      }
+    }
 
     // Check for capability-specific pending items
     const notSelf = user.employeeId ? { NOT: { employeeId: user.employeeId } } : {};
@@ -133,27 +159,30 @@ export async function GET(req: NextRequest) {
 
     }
 
-    if (canCompanyWide(user, 'exit:process')) {
-      // Pending Exit Requests
-      const pendingExits = await prisma.exitRequest.findMany({
-        where: { tenantId: user.tenantId, status: { in: ['INITIATED', 'APPROVED', 'CLEARANCE_IN_PROGRESS'] } },
-        include: { employee: true },
-        take: 5,
-      });
-
-      pendingExits.forEach((ex) => {
-        alerts.push({
-          id: `exit-${ex.id}`,
-          title: 'Resignation & Exit Workflow',
-          message: `${ex.employee.displayName || ex.employee.firstName} submitted resignation (LWD: ${new Date(ex.requestedLwd || ex.approvedLwd || ex.createdAt).toLocaleDateString()})`,
-          type: 'ALERT',
-          category: 'EXIT',
-          link: '/exit',
-          isRead: false,
-          createdAt: ex.createdAt,
+    // Resignations waiting for this user's decision: their reports (manager step) and, for HR, the HR step
+    {
+      const exitWhere: any[] = [];
+      if (user.employeeId) exitWhere.push({ status: 'PENDING_MANAGER', employee: { reportingManagerId: user.employeeId } });
+      if (isHrApprover(user)) exitWhere.push({ status: { in: ['PENDING_HR', 'INITIATED'] } });
+      if (exitWhere.length) {
+        const pendingExits = await prisma.exitRequest.findMany({
+          where: { tenantId: user.tenantId, OR: exitWhere, ...notSelf },
+          include: { employee: true },
+          take: 5,
         });
-      });
-
+        pendingExits.forEach((ex) => {
+          alerts.push({
+            id: `exit-${ex.id}`,
+            title: 'Resignation awaiting your approval',
+            message: `${ex.employee.displayName || ex.employee.firstName} resigned (requested last day ${new Date(ex.requestedLwd).toLocaleDateString('en-IN')})`,
+            type: 'APPROVAL',
+            category: 'EXIT',
+            link: '/exit',
+            isRead: false,
+            createdAt: ex.createdAt,
+          });
+        });
+      }
     }
 
     if (can(user, 'recruitment:manage')) {
@@ -179,8 +208,9 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Sort all alerts newest first
+    // Sort all alerts newest first; the onboarding reminder always stays on top
     alerts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    if (pinned) alerts.unshift(pinned);
 
     const unreadCount = alerts.filter((a) => !a.isRead).length;
 
