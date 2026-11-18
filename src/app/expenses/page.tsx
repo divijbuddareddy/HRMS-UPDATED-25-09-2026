@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { can } from '@/lib/access-policy';
-import { X, Check, Plus, Receipt, AlertCircle, Clock, CheckCircle2, XCircle } from 'lucide-react';
+import { X, Check, Plus, Receipt, AlertCircle, Clock, CheckCircle2, XCircle, Upload, Paperclip, Eye, Download, FileText } from 'lucide-react';
 
 type Category = { id: string; name: string; code: string; maxLimit: number | null };
 type Claim = {
@@ -33,7 +33,9 @@ const STATUS: Record<string, { label: string; cls: string; icon: any }> = {
 
 const inr = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const today = () => format(new Date(), 'yyyy-MM-dd');
-const emptyForm = () => ({ categoryId: '', amount: '', claimDate: today(), merchant: '', description: '', receiptUrl: '' });
+const emptyForm = () => ({ categoryId: '', amount: '', claimDate: today(), merchant: '', description: '' });
+const MAX_RECEIPT_BYTES = 5 * 1024 * 1024;
+const isInternalFile = (u?: string | null) => !!u && u.startsWith('/api/employee-documents/');
 
 export default function ExpensesPage() {
   const { user } = useAuth();
@@ -53,6 +55,35 @@ export default function ExpensesPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Claim | null>(null);
   const [acting, setActing] = useState(false);
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const pickReceipt = (file?: File | null) => {
+    if (!file) return;
+    if (!/\.(pdf|jpe?g|png)$/i.test(file.name) && !/^(application\/pdf|image\/(jpeg|png))$/i.test(file.type)) {
+      setFormError('Receipt must be a PDF, JPG or PNG file.');
+      return;
+    }
+    if (file.size > MAX_RECEIPT_BYTES) {
+      setFormError('Receipt is larger than 5 MB.');
+      return;
+    }
+    setFormError(null);
+    setReceipt(file);
+  };
+
+  // A file dropped outside the drop zone would make the browser open it and leave the page
+  useEffect(() => {
+    const block = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
+    };
+    window.addEventListener('dragover', block);
+    window.addEventListener('drop', block);
+    return () => {
+      window.removeEventListener('dragover', block);
+      window.removeEventListener('drop', block);
+    };
+  }, []);
 
   const load = async () => {
     try {
@@ -104,21 +135,18 @@ export default function ExpensesPage() {
     setSaving(true);
     try {
       const description = form.merchant.trim() ? `${form.merchant.trim()} — ${form.description.trim()}` : form.description.trim();
-      const res = await fetch('/api/expenses/claims', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          expenseCategoryId: form.categoryId,
-          amount,
-          claimDate: form.claimDate,
-          description,
-          receiptUrl: form.receiptUrl.trim() || undefined,
-        }),
-      });
+      const fd = new FormData();
+      fd.append('expenseCategoryId', form.categoryId);
+      fd.append('amount', String(amount));
+      fd.append('claimDate', form.claimDate);
+      fd.append('description', description);
+      if (receipt) fd.append('receipt', receipt);
+      const res = await fetch('/api/expenses/claims', { method: 'POST', body: fd });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || 'Could not submit the claim');
       setShowNew(false);
       setForm(emptyForm());
+      setReceipt(null);
       setTab('MINE');
       await load();
     } catch (err: any) {
@@ -209,6 +237,7 @@ export default function ExpensesPage() {
             <button
               onClick={() => {
                 setForm(emptyForm());
+                setReceipt(null);
                 setFormError(null);
                 setShowNew(true);
               }}
@@ -264,7 +293,10 @@ export default function ExpensesPage() {
                         </span>
                       </td>
                       <td className="py-3 px-4 text-slate-700 max-w-xs">
-                        <div className="line-clamp-2">{c.description}</div>
+                        <div className="line-clamp-2">
+                          {c.receiptUrl && <Paperclip className="inline h-3 w-3 mr-1 text-slate-400" />}
+                          {c.description}
+                        </div>
                         {c.status === 'REJECTED' && c.approverNotes && (
                           <div className="text-[11px] text-rose-600 mt-0.5">Reason: {c.approverNotes}</div>
                         )}
@@ -307,7 +339,16 @@ export default function ExpensesPage() {
               <Row
                 k="Receipt"
                 v={
-                  /^https?:\/\//i.test(selected.receiptUrl) ? (
+                  isInternalFile(selected.receiptUrl) ? (
+                    <span className="inline-flex items-center gap-3">
+                      <a href={selected.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-1">
+                        <Eye className="h-3.5 w-3.5" /> View
+                      </a>
+                      <a href={`${selected.receiptUrl}?download=1`} className="text-blue-600 hover:underline inline-flex items-center gap-1">
+                        <Download className="h-3.5 w-3.5" /> Download
+                      </a>
+                    </span>
+                  ) : /^https?:\/\//i.test(selected.receiptUrl) ? (
                     <a href={selected.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">
                       Open receipt
                     </a>
@@ -411,13 +452,60 @@ export default function ExpensesPage() {
               />
             </div>
             <div>
-              <label className="font-medium text-slate-700 block mb-1">Receipt link / bill number (optional)</label>
-              <input
-                value={form.receiptUrl}
-                onChange={(e) => setForm({ ...form, receiptUrl: e.target.value })}
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
-                placeholder="e.g. Google Drive link or invoice no."
-              />
+              <label className="font-medium text-slate-700 block mb-1">Receipt (PDF, JPG or PNG · max 5 MB)</label>
+              {receipt ? (
+                <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileText className="h-5 w-5 text-emerald-700 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-900 truncate">{receipt.name}</div>
+                      <div className="text-[10px] text-slate-500">{(receipt.size / 1024).toFixed(0)} KB</div>
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => setReceipt(null)} className="text-rose-600 font-semibold hover:underline shrink-0">
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <label
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                    setDragOver(true);
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    pickReceipt(e.dataTransfer.files?.[0]);
+                  }}
+                  className={`border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center cursor-pointer text-center transition-all ${
+                    dragOver ? 'border-emerald-500 bg-emerald-50 ring-4 ring-emerald-100' : 'border-slate-300 hover:border-emerald-500 bg-slate-50'
+                  }`}
+                >
+                  <Upload className={`h-6 w-6 mb-1.5 ${dragOver ? 'text-emerald-600' : 'text-slate-400'}`} />
+                  <span className="font-semibold text-slate-700">
+                    {dragOver ? 'Drop the receipt here' : 'Click to upload or drag & drop your receipt'}
+                  </span>
+                  <span className="text-[10px] text-slate-400 mt-0.5">Photo of the bill or a PDF invoice</span>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                    className="hidden"
+                    onChange={(e) => {
+                      pickReceipt(e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              )}
             </div>
             {formError && (
               <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 flex items-center gap-1.5">

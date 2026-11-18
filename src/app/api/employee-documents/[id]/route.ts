@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { canActOnEmployee, forbidden } from '@/lib/access';
+import { can, canActOnEmployee, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
 import { canAccessEmployeeDocs, canReviewDocuments, readUpload } from '@/lib/uploads';
 
@@ -17,7 +17,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const allowed =
       !!doc &&
       (canAccessEmployeeDocs(user, doc.employeeId) ||
-        (doc.docType === 'PERFORMANCE' && (await canActOnEmployee(user, doc.employeeId, 'performance:review'))));
+        (doc.docType === 'PERFORMANCE' && (await canActOnEmployee(user, doc.employeeId, 'performance:review'))) ||
+        (doc.docType === 'RECEIPT' &&
+          (can(user, 'expense:final-approve') || (await canActOnEmployee(user, doc.employeeId, 'expense:approve')))));
     if (!doc || !allowed) {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 });
     }
@@ -59,8 +61,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const doc = await prisma.employeeUpload.findFirst({ where: { id, tenantId: user.tenantId } });
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
-    if (doc.docType === 'PERFORMANCE') {
-      return NextResponse.json({ error: 'Performance documents are not verified.' }, { status: 400 });
+    if (doc.docType === 'PERFORMANCE' || doc.docType === 'RECEIPT') {
+      return NextResponse.json({ error: 'Only onboarding documents are verified here.' }, { status: 400 });
     }
     if (user.employeeId && doc.employeeId === user.employeeId) {
       return forbidden('You cannot verify your own documents.');

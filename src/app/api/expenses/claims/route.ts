@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { submitExpenseClaim } from '@/lib/expenses/engine';
 import { employeeIdFilter, forbidden, visibleEmployeeIds } from '@/lib/access';
+import { MAX_UPLOAD_BYTES, cleanFileName, deleteUpload, saveUpload, sniffFileType } from '@/lib/uploads';
 
 export async function GET(req: NextRequest) {
   try {
@@ -44,7 +45,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'User is not linked to an employee profile' }, { status: 400 });
     }
 
-    const body = await req.json();
+    // JSON, or multipart form data when a receipt file is attached
+    let body: any;
+    let receiptFile: File | null = null;
+    if ((req.headers.get('content-type') || '').includes('multipart/form-data')) {
+      const form = await req.formData();
+      body = Object.fromEntries([...form.entries()].filter(([, v]) => typeof v === 'string'));
+      const f = form.get('receipt');
+      if (f && typeof f !== 'string' && f.size > 0) receiptFile = f;
+    } else {
+      body = await req.json();
+    }
     // Claims can only be submitted for yourself.
     if (body.employeeId && body.employeeId !== user.employeeId) {
       return forbidden('You can only submit expense claims for yourself.');
@@ -75,17 +86,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Describe what the expense was for.' }, { status: 400 });
     }
 
-    const claim = await submitExpenseClaim({
-      tenantId: user.tenantId,
-      employeeId: user.employeeId,
-      expenseCategoryId: body.expenseCategoryId,
-      claimDate,
-      amount,
-      description: String(body.description).trim().slice(0, 1000),
-      receiptUrl: body.receiptUrl,
-      costCenter: body.costCenter,
-      paymentMethod: body.paymentMethod,
-    });
+    // Receipt file: PDF / JPG / PNG up to 5 MB, stored privately like other employee files
+    let receiptUpload: { id: string; storageKey: string } | null = null;
+    if (receiptFile) {
+      if (receiptFile.size > MAX_UPLOAD_BYTES) {
+        return NextResponse.json({ error: 'Receipt is too large. Maximum size is 5 MB.' }, { status: 400 });
+      }
+      const buf = Buffer.from(await receiptFile.arrayBuffer());
+      const kind = sniffFileType(buf);
+      if (!kind) return NextResponse.json({ error: 'Receipt must be a PDF, JPG or PNG file.' }, { status: 400 });
+      const { storageKey, checksum } = await saveUpload(user.tenantId, user.employeeId, buf, kind.ext);
+      const up = await prisma.employeeUpload.create({
+        data: {
+          tenantId: user.tenantId,
+          employeeId: user.employeeId,
+          docType: 'RECEIPT',
+          title: 'Expense receipt',
+          fileName: cleanFileName(receiptFile.name, kind.ext),
+          mimeType: kind.mime,
+          sizeBytes: buf.length,
+          storageKey,
+          checksum,
+          status: 'ATTACHED',
+          uploadedById: user.userId,
+        },
+        select: { id: true, storageKey: true },
+      });
+      receiptUpload = up;
+    }
+
+    let claim;
+    try {
+      claim = await submitExpenseClaim({
+        tenantId: user.tenantId,
+        employeeId: user.employeeId,
+        expenseCategoryId: body.expenseCategoryId,
+        claimDate,
+        amount,
+        description: String(body.description).trim().slice(0, 1000),
+        receiptUrl: receiptUpload ? `/api/employee-documents/${receiptUpload.id}` : undefined,
+        costCenter: body.costCenter,
+        paymentMethod: body.paymentMethod,
+      });
+    } catch (err) {
+      // Claim refused (e.g. over the category limit): don't keep an orphaned receipt
+      if (receiptUpload) {
+        await prisma.employeeUpload.delete({ where: { id: receiptUpload.id } }).catch(() => undefined);
+        await deleteUpload(receiptUpload.storageKey);
+      }
+      throw err;
+    }
 
     return NextResponse.json({ success: true, claim }, { status: 201 });
   } catch (error: any) {
