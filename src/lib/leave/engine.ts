@@ -236,10 +236,27 @@ export async function validateAndApplyLeave(params: ValidateAndApplyLeaveParams)
     params.leaveTypeId
   );
 
+  // Days already requested but not yet approved also count, so pending requests can't over-book.
+  const pendingAgg = await prisma.leaveRequest.aggregate({
+    where: {
+      tenantId: params.tenantId,
+      employeeId: params.employeeId,
+      leaveTypeId: params.leaveTypeId,
+      status: 'PENDING',
+    },
+    _sum: { totalDays: true },
+  });
+  const pendingDays = pendingAgg._sum.totalDays || 0;
+
   const maxNeg = policy?.maxNegativeBalance || 0;
-  if (currentBalance - requestedDays < -maxNeg) {
+  if (currentBalance - pendingDays - requestedDays < -maxNeg) {
+    const available = currentBalance - pendingDays;
     throw new Error(
-      `Insufficient leave balance. Current: ${currentBalance}, Requested: ${requestedDays}, Negative limit: ${maxNeg}`
+      `Not enough leave balance. Available: ${available} day(s)` +
+        (pendingDays ? ` (after ${pendingDays} day(s) pending approval)` : '') +
+        `, requested: ${requestedDays} day(s)` +
+        (maxNeg ? `, allowed below zero: ${maxNeg}` : '') +
+        '.'
     );
   }
 

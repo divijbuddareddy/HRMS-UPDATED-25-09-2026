@@ -840,6 +840,75 @@ export default function LeavePage() {
                   </select>
                 </div>
 
+                {/* Balance summary for the selected leave type */}
+                {(() => {
+                  const b = balances.find((x) => x.leaveTypeId === leaveTypeId);
+                  if (!b) return null;
+                  // Same rule as the server: weekdays only, 0.5 for a half day
+                  let requested = 0;
+                  if (isHalfDay) requested = 0.5;
+                  else if (startDate && endDate && endDate >= startDate) {
+                    for (let d = new Date(`${startDate}T00:00:00`); d <= new Date(`${endDate}T00:00:00`); d.setDate(d.getDate() + 1)) {
+                      if (d.getDay() !== 0 && d.getDay() !== 6) requested += 1;
+                    }
+                  }
+                  const pending = myRequests
+                    .filter((r) => r.status === 'PENDING' && r.leaveTypeId === leaveTypeId)
+                    .reduce((a, r) => a + (r.totalDays || 0), 0);
+                  const available = b.currentBalance;
+                  const after = available - pending - requested;
+                  const negLimit = selectedPolicy?.maxNegativeBalance || 0;
+                  const tooMuch = b.isPaid && after < -negLimit;
+                  const fmt = (n: number) => `${Number.isInteger(n) ? n : n.toFixed(1)} day${Math.abs(n) === 1 ? '' : 's'}`;
+
+                  if (!b.isPaid) {
+                    return (
+                      <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 space-y-1">
+                        <div className="font-semibold">{b.leaveTypeName} is unpaid</div>
+                        <div>
+                          Used so far: <strong>{fmt(b.totalConsumed)}</strong> · This request: <strong>{fmt(requested)}</strong>
+                        </div>
+                        <div className="text-[11px]">Salary is deducted for these days.</div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className={`p-3 rounded-xl border ${tooMuch ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50/60 border-emerald-200'}`}>
+                      <div className="font-semibold text-slate-800 mb-2">{b.leaveTypeName} balance</div>
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-white rounded-lg p-2 border border-slate-100">
+                          <div className="text-[10px] text-slate-500 uppercase">Earned</div>
+                          <div className="text-sm font-bold text-slate-900">{fmt(b.totalAccrued)}</div>
+                          <div className="text-[10px] text-slate-400">of {b.annualQuota}/yr</div>
+                        </div>
+                        <div className="bg-white rounded-lg p-2 border border-slate-100">
+                          <div className="text-[10px] text-slate-500 uppercase">Consumed</div>
+                          <div className="text-sm font-bold text-slate-900">{fmt(b.totalConsumed)}</div>
+                          <div className="text-[10px] text-slate-400">{pending > 0 ? `+ ${fmt(pending)} pending` : 'approved leave'}</div>
+                        </div>
+                        <div className="bg-white rounded-lg p-2 border border-slate-100">
+                          <div className="text-[10px] text-slate-500 uppercase">Remaining</div>
+                          <div className={`text-sm font-bold ${available - pending < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{fmt(available - pending)}</div>
+                          <div className="text-[10px] text-slate-400">available now</div>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex justify-between text-[11px]">
+                        <span className="text-slate-600">
+                          This request: <strong>{fmt(requested)}</strong>
+                        </span>
+                        <span className={tooMuch ? 'text-rose-700 font-semibold' : 'text-slate-600'}>
+                          Left after this: <strong>{fmt(after)}</strong>
+                        </span>
+                      </div>
+                      {tooMuch && (
+                        <div className="mt-1.5 text-[11px] text-rose-700">
+                          Not enough balance{negLimit ? ` (you may go up to ${negLimit} below zero)` : ''}. Choose fewer days or a different leave type.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="font-medium text-slate-700 block mb-1">Start Date *</label>
