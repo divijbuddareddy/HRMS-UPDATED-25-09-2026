@@ -16,6 +16,7 @@ import {
   MapPin,
   ArrowRight,
   ShieldAlert,
+  ClipboardCheck,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -84,6 +85,26 @@ export default function DashboardPage() {
     loadData();
   });
 
+  // Onboarding document progress for the logged-in employee
+  const [docStatus, setDocStatus] = useState<{ required: number; uploaded: number; verified: number; rejected: number } | null>(null);
+  useEffect(() => {
+    if (!user?.employee?.id) return;
+    fetch(`/api/employee-documents?employeeId=${user.employee.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d?.docTypes) return;
+        const req = d.docTypes.filter((t: any) => t.required).map((t: any) => t.key);
+        const latest = (k: string) => (d.uploads || []).find((u: any) => u.docType === k);
+        setDocStatus({
+          required: req.length,
+          uploaded: req.filter((k: string) => latest(k) && latest(k).status !== 'REJECTED').length,
+          verified: req.filter((k: string) => latest(k)?.status === 'VERIFIED').length,
+          rejected: req.filter((k: string) => latest(k)?.status === 'REJECTED').length,
+        });
+      })
+      .catch(() => undefined);
+  }, [user?.employee?.id]);
+
   const handleQuickPunch = async (punchType: 'CHECK_IN' | 'CHECK_OUT') => {
     setPunching(true);
     setPunchMessage(null);
@@ -142,6 +163,32 @@ export default function DashboardPage() {
       subtitle={`Tenant: ${user?.tenantName} • Role: ${activeRole.replace(/_/g, ' ')}`}
     >
       <div className="space-y-6">
+        {/* Onboarding documents (employees) */}
+        {docStatus && docStatus.verified < docStatus.required && (
+          <Link
+            href="/my-onboarding"
+            className="flex items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-emerald-200 shadow-sm hover:bg-emerald-50/40 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600">
+                <ClipboardCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800">My Onboarding</h3>
+                <p className="text-xs text-slate-500">
+                  {docStatus.uploaded < docStatus.required
+                    ? `Upload your joining documents (Aadhaar, PAN, Offer Letter): ${docStatus.uploaded} of ${docStatus.required} uploaded`
+                    : `All documents uploaded: ${docStatus.verified} of ${docStatus.required} verified by HR`}
+                  {docStatus.rejected > 0 ? ` · ${docStatus.rejected} rejected, please re-upload` : ''}
+                </p>
+              </div>
+            </div>
+            <span className="text-xs text-emerald-700 font-medium flex items-center gap-0.5 shrink-0">
+              {docStatus.uploaded < docStatus.required || docStatus.rejected > 0 ? 'Upload' : 'View'} <ArrowRight className="h-3 w-3" />
+            </span>
+          </Link>
+        )}
+
         {/* Top Summary Banner / Quick Punch */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {/* Web Punch Card */}

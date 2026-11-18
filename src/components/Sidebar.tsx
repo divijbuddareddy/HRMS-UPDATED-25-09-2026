@@ -25,6 +25,8 @@ import {
   Layers,
   Key,
   X,
+  ClipboardCheck,
+  FolderOpen,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -68,6 +70,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ...(can(user, 'recruitment:manage') ? [{ label: 'Recruitment (ATS)', href: '/recruitment', icon: UserPlus2 }] : []),
     { label: 'Careers Portal', href: '/careers', icon: Sparkles },
     ...(can(user, 'onboarding:manage') ? [{ label: 'Onboarding', href: '/onboarding', icon: CheckSquare }] : []),
+    ...(user?.employee?.id ? [{ label: 'My Onboarding', href: '/my-onboarding', icon: ClipboardCheck }] : []),
+    ...(canCompanyWide(user, 'onboarding:manage') || canCompanyWide(user, 'employees:manage')
+      ? [{ label: 'Employee Documents', href: '/employee-documents', icon: FolderOpen }]
+      : []),
     { label: 'Documents & E-Sign', href: '/documents', icon: FileSignature },
     { label: 'Performance & OKRs', href: '/performance', icon: Target },
     { label: 'Expenses', href: '/expenses', icon: Receipt },

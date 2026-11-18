@@ -1,0 +1,71 @@
+import path from 'path';
+import { promises as fs } from 'fs';
+import crypto from 'crypto';
+import { AuthUser } from './types';
+import { canCompanyWide } from './access-policy';
+
+/** Where uploaded files live. Kept outside the app folder so deploys never touch them. */
+export const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
+
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
+
+export const DOC_TYPES = [
+  { key: 'AADHAAR', label: 'Aadhaar Card', required: true, hint: 'Front and back, as PDF or a clear photo' },
+  { key: 'PAN', label: 'PAN Card', required: true, hint: 'Clear scan or photo of your PAN card' },
+  { key: 'OFFER_LETTER', label: 'Signed Offer Letter', required: true, hint: 'Your offer letter, signed by you' },
+  { key: 'OTHER', label: 'Other Document', required: false, hint: 'Anything else HR asked for (optional)' },
+] as const;
+
+export type DocTypeKey = (typeof DOC_TYPES)[number]['key'];
+export const REQUIRED_DOC_TYPES = DOC_TYPES.filter((d) => d.required).map((d) => d.key) as DocTypeKey[];
+
+export function isDocType(v: unknown): v is DocTypeKey {
+  return DOC_TYPES.some((d) => d.key === v);
+}
+
+/** Detect the real file type from its first bytes (never trust the browser's claim). */
+export function sniffFileType(buf: Buffer): { mime: string; ext: string } | null {
+  if (buf.length >= 5 && buf.subarray(0, 5).toString('latin1') === '%PDF-') return { mime: 'application/pdf', ext: 'pdf' };
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { mime: 'image/jpeg', ext: 'jpg' };
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+    return { mime: 'image/png', ext: 'png' };
+  return null;
+}
+
+/** HR / owner (company-wide) may see and review every employee's documents. */
+export function canReviewDocuments(user: AuthUser): boolean {
+  return canCompanyWide(user, 'onboarding:manage') || canCompanyWide(user, 'employees:manage');
+}
+
+export function canAccessEmployeeDocs(user: AuthUser, employeeId: string): boolean {
+  return (!!user.employeeId && user.employeeId === employeeId) || canReviewDocuments(user);
+}
+
+export async function saveUpload(tenantId: string, employeeId: string, buf: Buffer, ext: string) {
+  const storageKey = path.posix.join(tenantId, employeeId, `${crypto.randomUUID()}.${ext}`);
+  const full = resolveKey(storageKey);
+  await fs.mkdir(path.dirname(full), { recursive: true, mode: 0o750 });
+  await fs.writeFile(full, buf, { mode: 0o640 });
+  return { storageKey, checksum: crypto.createHash('sha256').update(buf).digest('hex') };
+}
+
+export async function readUpload(storageKey: string) {
+  return fs.readFile(resolveKey(storageKey));
+}
+
+export async function deleteUpload(storageKey: string) {
+  await fs.unlink(resolveKey(storageKey)).catch(() => undefined);
+}
+
+function resolveKey(storageKey: string) {
+  const root = path.resolve(UPLOAD_DIR);
+  const full = path.resolve(root, storageKey);
+  if (!full.startsWith(root + path.sep)) throw new Error('Invalid storage key');
+  return full;
+}
+
+/** A filename that's safe to show and to put in a Content-Disposition header. */
+export function cleanFileName(name: string, ext: string) {
+  const base = (name || 'document').replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9 _.-]+/g, '_').trim().slice(0, 80) || 'document';
+  return `${base}.${ext}`;
+}

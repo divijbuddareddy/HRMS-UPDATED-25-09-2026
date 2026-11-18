@@ -309,6 +309,7 @@ model Employee {
   expenseClaims       ExpenseClaim[]
   assetAssignments    AssetAssignment[]
   exitRequests        ExitRequest[]
+  uploads             EmployeeUpload[]
 
   @@unique([tenantId, employeeCode])
   @@unique([tenantId, workEmail])
@@ -1383,4 +1384,26 @@ model AIProviderConfiguration {
   tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
+// Files an employee uploads during onboarding (Aadhaar, PAN, offer letter, ...). Stored on disk
+// outside the app folder (UPLOAD_DIR); only the employee and HR / owner can read them.
+model EmployeeUpload {
+  id           String    @id @default(uuid())
+  tenantId     String
+  employeeId   String
+  docType      String    // AADHAAR, PAN, OFFER_LETTER, OTHER
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  storageKey   String
+  checksum     String
+  status       String    @default("SUBMITTED") // SUBMITTED, VERIFIED, REJECTED
+  reviewNote   String?
+  uploadedById String
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime  @default(now())
 
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, employeeId])
+}
