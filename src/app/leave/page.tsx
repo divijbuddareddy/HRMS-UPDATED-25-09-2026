@@ -28,6 +28,8 @@ export default function LeavePage() {
   const [teamRequests, setTeamRequests] = useState<any[]>([]);
   const [ledgerLogs, setLedgerLogs] = useState<any[]>([]);
   const isHRAdmin = user?.roles?.some((r) => ['HR_ADMIN', 'COMPANY_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
+  // Matches the server rule in /api/leave/cancel: owner / HR Admin can cancel any approved leave.
+  const canCancelAnyLeave = !!user?.roles?.some((r) => ['PLATFORM_SUPER_ADMIN', 'COMPANY_ADMIN', 'HR_ADMIN'].includes(r));
   const isManager = user?.roles?.some((r) => ['MANAGER', 'HR_ADMIN', 'COMPANY_ADMIN', 'PLATFORM_SUPER_ADMIN'].includes(r));
   const canConfigureLeave = can(user, 'leave:configure');
   
@@ -240,13 +242,20 @@ export default function LeavePage() {
     }
   };
 
-  const handleCancelLeave = async (id: string) => {
-    if (!confirm('Are you sure you want to cancel / withdraw this leave request?')) return;
+  const handleCancelLeave = async (id: string, approved = false) => {
+    let reason = '';
+    if (approved) {
+      const r = prompt('Cancel this approved leave? The days will be added back to the leave balance.\n\nReason (optional):');
+      if (r === null) return;
+      reason = r;
+    } else if (!confirm('Are you sure you want to withdraw this leave request?')) {
+      return;
+    }
     try {
       const res = await fetch('/api/leave/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ leaveRequestId: id }),
+        body: JSON.stringify({ leaveRequestId: id, reason }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -435,6 +444,17 @@ export default function LeavePage() {
                             Withdraw
                           </button>
                         )}
+                        {req.status === 'APPROVED' &&
+                          (new Date(req.startDate).setHours(0, 0, 0, 0) > new Date().setHours(0, 0, 0, 0) ? (
+                            <button
+                              onClick={() => handleCancelLeave(req.id, true)}
+                              className="px-2.5 py-1 text-[11px] text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 font-semibold transition-colors"
+                            >
+                              Cancel leave
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-slate-400">Started – ask HR to cancel</span>
+                          ))}
                       </td>
                     </tr>
                   ))}
@@ -494,6 +514,14 @@ export default function LeavePage() {
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right">
+                        {req.status === 'APPROVED' && canCancelAnyLeave && (
+                          <button
+                            onClick={() => handleCancelLeave(req.id, true)}
+                            className="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-700 rounded-lg font-medium text-xs border border-rose-200"
+                          >
+                            Cancel leave
+                          </button>
+                        )}
                         {req.status === 'PENDING' && (
                           <div className="flex justify-end gap-1.5">
                             <button

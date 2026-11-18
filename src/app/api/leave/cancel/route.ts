@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { createAuditLog } from '@/lib/audit';
+import { processDailyAttendanceRecord } from '@/lib/attendance/engine';
+import { eachDayOfInterval, startOfDay } from 'date-fns';
 
 export async function POST(req: NextRequest) {
   try {
@@ -35,6 +37,14 @@ export async function POST(req: NextRequest) {
 
     if (leaveReq.status === 'CANCELLED' || leaveReq.status === 'REJECTED') {
       return NextResponse.json({ error: `Leave request is already ${leaveReq.status.toLowerCase()}` }, { status: 400 });
+    }
+
+    // Employees may cancel approved leave only before it starts; HR / owner can cancel any time.
+    if (leaveReq.status === 'APPROVED' && !isHR && startOfDay(leaveReq.startDate) <= startOfDay(new Date())) {
+      return NextResponse.json(
+        { error: 'This leave has already started. Please ask HR to cancel it.' },
+        { status: 400 },
+      );
     }
 
     // If leave was approved, we must credit the debited days back to the ledger
@@ -71,10 +81,36 @@ export async function POST(req: NextRequest) {
           where: { id: leaveReq.id },
           data: {
             status: 'CANCELLED',
-            approverNotes: reason ? `Cancelled by employee/HR: ${reason}` : 'Cancelled by employee/HR',
+            approverNotes: `Cancelled after approval by ${isOwner ? 'employee' : 'HR'}${reason ? `: ${reason}` : ''}`,
+          },
+        });
+
+        // Remove the attendance entries the approval wrote (non-regularized "Leave (...)" days)
+        await tx.dailyAttendanceRecord.deleteMany({
+          where: {
+            tenantId: leaveReq.tenantId,
+            employeeId: leaveReq.employeeId,
+            date: { gte: startOfDay(leaveReq.startDate), lte: startOfDay(leaveReq.endDate) },
+            isRegularized: false,
+            notes: { startsWith: 'Leave (' },
           },
         });
       });
+
+      // Past days fall back to normal attendance: punches => present, otherwise absent / week-off.
+      const today = startOfDay(new Date());
+      for (const d of eachDayOfInterval({ start: leaveReq.startDate, end: leaveReq.endDate })) {
+        const day = startOfDay(d);
+        if (day < today) {
+          await processDailyAttendanceRecord(leaveReq.tenantId, leaveReq.employeeId, d);
+        } else if (day.getTime() === today.getTime()) {
+          // Today: only rebuild if they've already punched; otherwise the normal flow handles it.
+          const punchedToday = await prisma.rawAttendancePunch.count({
+            where: { tenantId: leaveReq.tenantId, employeeId: leaveReq.employeeId, punchTimestamp: { gte: today } },
+          });
+          if (punchedToday > 0) await processDailyAttendanceRecord(leaveReq.tenantId, leaveReq.employeeId, d);
+        }
+      }
     } else {
       // Pending request: simply mark as CANCELLED
       await prisma.leaveRequest.update({
