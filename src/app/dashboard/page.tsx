@@ -229,7 +229,7 @@ export default function DashboardPage() {
               </div>
 
               <div className="grid grid-cols-3 gap-2 mt-3">
-                {leaveBalances.slice(0, 3).map((lb) => (
+                {leaveBalances.filter((lb) => lb.isPaid).slice(0, 3).map((lb) => (
                   <div key={lb.leaveTypeId} className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
                     <div className="text-[11px] font-semibold text-slate-500 uppercase">{lb.leaveTypeCode}</div>
                     <div className="text-lg font-bold text-slate-900 mt-0.5">{lb.currentBalance}</div>

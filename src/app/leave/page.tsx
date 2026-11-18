@@ -315,11 +315,22 @@ export default function LeavePage() {
                   {b.leaveTypeCode}
                 </span>
               </div>
-              <div className="text-2xl font-black text-slate-900">{b.currentBalance}</div>
-              <div className="text-[11px] text-slate-400 mt-1 flex justify-between">
-                <span>Quota: {b.annualQuota}d</span>
-                <span>Consumed: {b.totalConsumed}d</span>
-              </div>
+              {b.isPaid ? (
+                <>
+                  <div className="text-2xl font-black text-slate-900">
+                    {b.currentBalance} <span className="text-xs font-semibold text-slate-400">days left</span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-1 flex justify-between">
+                    <span>Earned: {b.totalAccrued}d / {b.annualQuota}d</span>
+                    <span>Used: {b.totalConsumed}d</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-sm font-bold text-slate-500 mt-2">Unpaid · no limit</div>
+                  <div className="text-[11px] text-slate-400 mt-1">Used: {b.totalConsumed}d (salary deducted)</div>
+                </>
+              )}
             </div>
           ))}
         </div>
