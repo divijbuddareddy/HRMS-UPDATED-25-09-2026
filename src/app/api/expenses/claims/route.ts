@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     const claims = await prisma.expenseClaim.findMany({
       where,
       include: {
-        employee: true,
+        employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
         category: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -60,13 +60,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Expense category not found' }, { status: 400 });
     }
 
+    const amount = parseFloat(body.amount);
+    if (!isFinite(amount) || amount <= 0) {
+      return NextResponse.json({ error: 'Enter a valid amount.' }, { status: 400 });
+    }
+    const claimDate = new Date(body.claimDate);
+    if (!body.claimDate || isNaN(claimDate.getTime())) {
+      return NextResponse.json({ error: 'Enter a valid expense date.' }, { status: 400 });
+    }
+    if (claimDate.getTime() > Date.now() + 24 * 60 * 60 * 1000) {
+      return NextResponse.json({ error: 'Expense date cannot be in the future.' }, { status: 400 });
+    }
+    if (!String(body.description ?? '').trim()) {
+      return NextResponse.json({ error: 'Describe what the expense was for.' }, { status: 400 });
+    }
+
     const claim = await submitExpenseClaim({
       tenantId: user.tenantId,
       employeeId: user.employeeId,
       expenseCategoryId: body.expenseCategoryId,
-      claimDate: new Date(body.claimDate),
-      amount: parseFloat(body.amount),
-      description: body.description,
+      claimDate,
+      amount,
+      description: String(body.description).trim().slice(0, 1000),
       receiptUrl: body.receiptUrl,
       costCenter: body.costCenter,
       paymentMethod: body.paymentMethod,
