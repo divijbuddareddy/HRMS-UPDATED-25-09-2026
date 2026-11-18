@@ -3,14 +3,14 @@ import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
+import { getCompanyDocuments } from '@/lib/onboarding/documents';
 import {
-  DOC_TYPES,
+  companyDocType,
   MAX_UPLOAD_BYTES,
   canAccessEmployeeDocs,
   canReviewDocuments,
   cleanFileName,
   deleteUpload,
-  isDocType,
   saveUpload,
   sniffFileType,
 } from '@/lib/uploads';
@@ -56,7 +56,8 @@ export async function GET(req: NextRequest) {
         },
         orderBy: { firstName: 'asc' },
       });
-      return NextResponse.json({ docTypes: DOC_TYPES, reviewer, employees });
+      const { docs } = await getCompanyDocuments(user.tenantId);
+      return NextResponse.json({ docTypes: docs, reviewer, employees });
     }
 
     const employeeId = requested || user.employeeId;
@@ -80,7 +81,8 @@ export async function GET(req: NextRequest) {
     ]);
     if (!employee) return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
 
-    return NextResponse.json({ docTypes: DOC_TYPES, reviewer, employee, uploads });
+    const { docs } = await getCompanyDocuments(user.tenantId);
+    return NextResponse.json({ docTypes: docs, reviewer, employee, uploads });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -105,8 +107,9 @@ export async function POST(req: NextRequest) {
     if (!canAccessEmployeeDocs(user, employeeId)) {
       return forbidden('You can only upload your own documents.');
     }
-    if (!isDocType(docType)) {
-      return NextResponse.json({ error: 'Choose a valid document type.' }, { status: 400 });
+    const docDef = await companyDocType(user.tenantId, docType);
+    if (!docDef || typeof docType !== 'string') {
+      return NextResponse.json({ error: 'Your company does not ask for this document.' }, { status: 400 });
     }
     if (!file || typeof file === 'string') {
       return NextResponse.json({ error: 'Choose a file to upload.' }, { status: 400 });
@@ -133,7 +136,7 @@ export async function POST(req: NextRequest) {
     // One current file per required type: a new upload replaces the previous one.
     // Once HR has verified it, only HR can replace it.
     const previous =
-      docType === 'OTHER'
+      docDef.multiple
         ? []
         : await prisma.employeeUpload.findMany({ where: { tenantId: user.tenantId, employeeId, docType } });
     if (!reviewer && previous.some((p) => p.status === 'VERIFIED')) {

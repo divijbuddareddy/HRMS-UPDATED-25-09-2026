@@ -214,7 +214,7 @@ export default function DashboardPage() {
                 <h3 className="text-sm font-semibold text-slate-800">My Onboarding</h3>
                 <p className="text-xs text-slate-500">
                   {docStatus.uploaded < docStatus.required
-                    ? `Upload your joining documents (Aadhaar, PAN, Offer Letter): ${docStatus.uploaded} of ${docStatus.required} uploaded`
+                    ? `Upload your joining documents: ${docStatus.uploaded} of ${docStatus.required} uploaded`
                     : `All documents uploaded: ${docStatus.verified} of ${docStatus.required} verified by HR`}
                   {docStatus.rejected > 0 ? ` · ${docStatus.rejected} rejected, please re-upload` : ''}
                 </p>

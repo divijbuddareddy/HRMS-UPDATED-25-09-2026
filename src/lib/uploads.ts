@@ -4,24 +4,18 @@ import crypto from 'crypto';
 import { AuthUser } from './types';
 import { canCompanyWide } from './access-policy';
 import { prisma } from './prisma';
+import { getCompanyDocuments } from './onboarding/documents';
 
 /** Where uploaded files live. Kept outside the app folder so deploys never touch them. */
 export const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
 
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
 
-export const DOC_TYPES = [
-  { key: 'AADHAAR', label: 'Aadhaar Card', required: true, hint: 'Front and back, as PDF or a clear photo' },
-  { key: 'PAN', label: 'PAN Card', required: true, hint: 'Clear scan or photo of your PAN card' },
-  { key: 'OFFER_LETTER', label: 'Signed Offer Letter', required: true, hint: 'Your offer letter, signed by you' },
-  { key: 'OTHER', label: 'Other Document', required: false, hint: 'Anything else HR asked for (optional)' },
-] as const;
-
-export type DocTypeKey = (typeof DOC_TYPES)[number]['key'];
-export const REQUIRED_DOC_TYPES = DOC_TYPES.filter((d) => d.required).map((d) => d.key) as DocTypeKey[];
-
-export function isDocType(v: unknown): v is DocTypeKey {
-  return DOC_TYPES.some((d) => d.key === v);
+/** Is this a document type the company asks for (or "Other")? */
+export async function companyDocType(tenantId: string, key: unknown) {
+  if (typeof key !== 'string') return null;
+  const { docs } = await getCompanyDocuments(tenantId);
+  return docs.find((d) => d.key === key) || null;
 }
 
 /** Detect the real file type from its first bytes (never trust the browser's claim). */
@@ -94,16 +88,21 @@ export function cleanFileName(name: string, ext: string) {
  * upload was rejected by HR. Empty when everything required is uploaded (verified or awaiting HR).
  */
 export async function missingOnboardingDocs(tenantId: string, employeeId: string) {
+  const { docs } = await getCompanyDocuments(tenantId);
+  const required = docs.filter((d) => d.required);
+  if (!required.length) return [];
   const uploads = await prisma.employeeUpload.findMany({
-    where: { tenantId, employeeId, docType: { in: REQUIRED_DOC_TYPES as unknown as string[] } },
+    where: { tenantId, employeeId, docType: { in: required.map((d) => d.key) } },
     select: { docType: true, status: true, reviewNote: true, createdAt: true },
     orderBy: { createdAt: 'desc' },
   });
   const result: { key: string; label: string; reason: 'MISSING' | 'REJECTED'; note?: string | null }[] = [];
-  for (const t of DOC_TYPES.filter((d) => d.required)) {
-    const latest = uploads.find((u) => u.docType === t.key);
-    if (!latest) result.push({ key: t.key, label: t.label, reason: 'MISSING' });
-    else if (latest.status === 'REJECTED') result.push({ key: t.key, label: t.label, reason: 'REJECTED', note: latest.reviewNote });
+  for (const t of required) {
+    const mine = uploads.filter((u) => u.docType === t.key);
+    // For multi-file documents it is enough to have one file that is not rejected
+    const ok = mine.some((u) => u.status !== 'REJECTED');
+    if (!mine.length) result.push({ key: t.key, label: t.label, reason: 'MISSING' });
+    else if (!ok) result.push({ key: t.key, label: t.label, reason: 'REJECTED', note: mine[0].reviewNote });
   }
   return result;
 }

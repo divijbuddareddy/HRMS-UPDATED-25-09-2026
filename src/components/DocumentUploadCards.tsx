@@ -4,7 +4,7 @@ import React, { useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { Upload, FileText, CheckCircle, AlertCircle, Clock, Eye, Download, ShieldCheck, XCircle } from 'lucide-react';
 
-export type DocType = { key: string; label: string; required: boolean; hint: string };
+export type DocType = { key: string; label: string; required: boolean; hint: string; multiple?: boolean };
 export type UploadRow = {
   id: string;
   docType: string;
@@ -136,7 +136,7 @@ export function DocumentUploadCards({
         {docTypes.map((dt) => {
           const files = uploads.filter((u) => u.docType === dt.key);
           const current = files[0];
-          const locked = !reviewer && current?.status === 'VERIFIED';
+          const locked = !reviewer && !dt.multiple && current?.status === 'VERIFIED';
           return (
             <div key={dt.key} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
               <div className="flex justify-between items-start gap-2">
@@ -148,7 +148,8 @@ export function DocumentUploadCards({
                   </div>
                   <div className="text-[11px] text-slate-500 mt-0.5">{dt.hint}</div>
                 </div>
-                {dt.key !== 'OTHER' && <StatusChip status={current?.status} />}
+                {!dt.multiple && <StatusChip status={current?.status} />}
+                {dt.multiple && dt.required && files.length === 0 && <StatusChip />}
               </div>
 
               {files.map((f) => (
@@ -179,7 +180,7 @@ export function DocumentUploadCards({
                       </a>
                     </div>
                   </div>
-                  {dt.key === 'OTHER' && <StatusChip status={f.status} />}
+                  {dt.multiple && <StatusChip status={f.status} />}
                   {f.status === 'REJECTED' && f.reviewNote && (
                     <div className="text-[11px] text-rose-700 bg-rose-50 border border-rose-100 rounded-lg p-2">
                       <strong>HR note:</strong> {f.reviewNote} — please upload a corrected file.
@@ -234,7 +235,7 @@ export function DocumentUploadCards({
                     <Upload className="h-3.5 w-3.5" />
                     {busy === dt.key
                       ? 'Uploading…'
-                      : dt.key === 'OTHER'
+                      : dt.multiple
                       ? 'Upload a document'
                       : current
                       ? 'Replace file'

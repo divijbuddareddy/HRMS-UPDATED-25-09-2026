@@ -4,7 +4,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { DocumentUploadCards, DocType, StatusChip, UploadRow } from '@/components/DocumentUploadCards';
-import { Search, X, FolderOpen } from 'lucide-react';
+import { Search, X, FolderOpen, Settings2 } from 'lucide-react';
+import { OnboardingDocSettings } from '@/components/OnboardingDocSettings';
 
 type EmpRow = {
   id: string;
@@ -25,6 +26,7 @@ export default function EmployeeDocumentsPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'ALL' | 'TO_REVIEW' | 'MISSING' | 'COMPLETE'>('ALL');
   const [openId, setOpenId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const load = async () => {
     try {
@@ -92,6 +94,12 @@ export default function EmployeeDocumentsPage() {
             />
           </div>
           <div className="flex flex-wrap gap-1.5 text-xs">
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="px-3 py-1.5 rounded-lg font-semibold bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1"
+            >
+              <Settings2 className="h-3.5 w-3.5" /> Choose documents
+            </button>
             {(
               [
                 ['ALL', 'All'],
@@ -174,6 +182,15 @@ export default function EmployeeDocumentsPage() {
             </table>
           </div>
         </div>
+
+        {docTypes.length > 0 && (
+          <div className="text-xs text-slate-600 bg-white p-3 rounded-xl border border-slate-200">
+            <strong>Your company asks for:</strong>{' '}
+            {docTypes.filter((d) => d.key !== 'OTHER').map((d) => `${d.label}${d.required ? '' : ' (optional)'}`).join(', ') || 'nothing yet'}
+          </div>
+        )}
+
+        {settingsOpen && <OnboardingDocSettings onClose={() => setSettingsOpen(false)} onSaved={load} />}
 
         {open && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">

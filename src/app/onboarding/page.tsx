@@ -347,13 +347,8 @@ export default function OnboardingPage() {
           </div>
 
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <span className="text-xs text-slate-500 block font-medium">Statutory Compliance Gates</span>
-            <span className="text-sm font-bold text-slate-800 mt-1.5 block">
-              PAN, Aadhaar, Bank Cheque, NDA
-            </span>
-            <span className="text-[11px] text-slate-400 block mt-0.5">
-              100% verified digital attachments
-            </span>
+            <span className="text-xs text-slate-500 block font-medium">Documents new joiners upload</span>
+            <RequiredDocsSummary />
           </div>
         </div>
 
@@ -961,5 +956,27 @@ export default function OnboardingPage() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+
+function RequiredDocsSummary() {
+  const [docs, setDocs] = React.useState<{ label: string; required: boolean }[] | null>(null);
+  React.useEffect(() => {
+    fetch('/api/onboarding/document-settings')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setDocs(d?.documents || []))
+      .catch(() => setDocs([]));
+  }, []);
+  const req = (docs || []).filter((d) => d.required).map((d) => d.label);
+  const opt = (docs || []).filter((d) => !d.required).length;
+  return (
+    <>
+      <span className="text-sm font-bold text-slate-800 mt-1.5 block">{docs === null ? '…' : req.join(', ') || 'None required'}</span>
+      <span className="text-[11px] text-slate-400 block mt-0.5">
+        {opt ? `+ ${opt} optional · ` : ''}
+        <a href="/employee-documents" className="text-emerald-600 hover:underline">Change list</a>
+      </span>
+    </>
   );
 }
