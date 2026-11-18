@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { departmentHeadFor } from '@/lib/org/departments';
 import { sanitizeEmployeeForUser } from '@/lib/rbac';
 import { can, canViewEmployee, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
@@ -77,6 +78,20 @@ export async function PUT(
 
     if (!existing || existing.tenantId !== user.tenantId) {
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
+    }
+
+    // Moving to another department: the new department's head becomes the reporting manager, unless
+    // HR picked a different manager in this same edit, or the employee had a manager who was not the
+    // old department's head (a manager chosen by hand is kept).
+    if (body.departmentId && body.departmentId !== existing.departmentId) {
+      const pickedNew = !!body.reportingManagerId && body.reportingManagerId !== existing.reportingManagerId;
+      if (!pickedNew) {
+        const oldHead = await departmentHeadFor(user.tenantId, existing.departmentId, id);
+        if (!existing.reportingManagerId || existing.reportingManagerId === oldHead) {
+          const newHead = await departmentHeadFor(user.tenantId, body.departmentId, id);
+          if (newHead) body.reportingManagerId = newHead;
+        }
+      }
     }
 
     // Reporting manager: '' / null clears it; otherwise must be another employee of this company,

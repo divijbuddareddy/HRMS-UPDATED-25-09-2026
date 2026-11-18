@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { departmentHeadFor } from '@/lib/org/departments';
 import { getUserDataScope, sanitizeEmployeeForUser, PERMISSIONS } from '@/lib/rbac';
 import { can, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
@@ -119,6 +120,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required employee fields' }, { status: 400 });
     }
 
+    // No manager chosen: default to the department head
+    const effectiveManagerId: string | null =
+      reportingManagerId || (departmentId ? await departmentHeadFor(user.tenantId, departmentId) : null);
+
     if (reportingManagerId) {
       const mgr = await prisma.employee.findFirst({ where: { id: reportingManagerId, tenantId: user.tenantId }, select: { id: true } });
       if (!mgr) return NextResponse.json({ error: 'Reporting manager not found' }, { status: 400 });
@@ -160,7 +165,7 @@ export async function POST(req: NextRequest) {
           departmentId,
           designationId,
           gradeId: gradeId || null,
-          reportingManagerId: reportingManagerId || null,
+          reportingManagerId: effectiveManagerId,
           status: 'ACTIVE',
         },
       });

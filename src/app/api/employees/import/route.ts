@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { can, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
 import Papa from 'papaparse';
+import { departmentHeadFor, ensureStandardDepartments } from '@/lib/org/departments';
 
 const MAX_ROWS = 2000;
 
@@ -137,6 +138,7 @@ export async function POST(req: NextRequest) {
     }
 
     const tenantId = user.tenantId;
+    await ensureStandardDepartments(tenantId);
     const [entities, branches, departments, designations, structures, existingEmps] = await Promise.all([
       prisma.legalEntity.findMany({ where: { tenantId }, orderBy: { createdAt: 'asc' } }),
       prisma.branchLocation.findMany({ where: { tenantId }, orderBy: { createdAt: 'asc' } }),
@@ -336,6 +338,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (!employeeCode) employeeCode = nextEmpCode();
+      const reportingManagerId = await departmentHeadFor(tenantId, departmentId);
 
       const empType = get('employmentType').toUpperCase().replace(/[\s-]+/g, '_');
       const pan = get('pan').toUpperCase();
@@ -366,6 +369,7 @@ export async function POST(req: NextRequest) {
               branchLocationId,
               departmentId,
               designationId,
+              reportingManagerId,
               status: 'ACTIVE',
             },
           });

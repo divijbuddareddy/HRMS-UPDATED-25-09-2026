@@ -3,24 +3,46 @@ import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { can, forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
+import { ensureStandardDepartments } from '@/lib/org/departments';
 
 export async function GET(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+    // Every company gets the standard departments (Sales, Finance, IT, Marketing, HR, ...)
+    await ensureStandardDepartments(user.tenantId);
+
     const [legalEntities, branchLocations, departments, designations, grades] = await Promise.all([
       prisma.legalEntity.findMany({ where: { tenantId: user.tenantId } }),
       prisma.branchLocation.findMany({ where: { tenantId: user.tenantId } }),
-      prisma.department.findMany({ where: { tenantId: user.tenantId } }),
+      prisma.department.findMany({
+        where: { tenantId: user.tenantId },
+        include: { _count: { select: { employees: { where: { status: { notIn: ['EXITED', 'ARCHIVED'] } } } } } },
+        orderBy: { name: 'asc' },
+      }),
       prisma.designation.findMany({ where: { tenantId: user.tenantId }, include: { department: true } }),
       prisma.grade.findMany({ where: { tenantId: user.tenantId } }),
     ]);
 
+    // Head names for display (directory info only)
+    const headIds = departments.map((d) => d.headEmployeeId).filter(Boolean) as string[];
+    const heads = headIds.length
+      ? await prisma.employee.findMany({
+          where: { id: { in: headIds }, tenantId: user.tenantId },
+          select: { id: true, firstName: true, lastName: true, employeeCode: true },
+        })
+      : [];
+    const headById = new Map(heads.map((h) => [h.id, h]));
+
     return NextResponse.json({
       legalEntities,
       branchLocations,
-      departments,
+      departments: departments.map(({ _count, ...d }) => ({
+        ...d,
+        employeeCount: _count.employees,
+        head: d.headEmployeeId ? headById.get(d.headEmployeeId) || null : null,
+      })),
       designations,
       grades,
     });

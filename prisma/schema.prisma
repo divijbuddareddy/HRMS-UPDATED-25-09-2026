@@ -200,6 +200,7 @@ model Department {
   name               String
   code               String
   parentDepartmentId String?
+  headEmployeeId     String?  // Department Head: default reporting manager for the department
   createdAt          DateTime @default(now())
 
   tenant             Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
