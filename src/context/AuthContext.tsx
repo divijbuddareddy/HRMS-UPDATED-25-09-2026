@@ -57,7 +57,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await fetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
-        const primaryRole = data.user.roles[0] || 'EMPLOYEE';
+        // Open on the most senior role the user holds (e.g. a reporting manager lands on the manager view)
+        const PRIORITY = ['PLATFORM_SUPER_ADMIN', 'COMPANY_ADMIN', 'HR_ADMIN', 'HR_EXECUTIVE', 'FINANCE', 'MANAGER', 'EMPLOYEE'];
+        const roles: string[] = data.user.roles || [];
+        const primaryRole = PRIORITY.find((r) => roles.includes(r)) || roles[0] || 'EMPLOYEE';
         setUser({
           ...data.user,
           activeRole: primaryRole,

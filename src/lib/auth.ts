@@ -125,6 +125,33 @@ export async function getAuthenticatedUser(req: NextRequest): Promise<AuthUser |
     }))
   );
 
+  // Reporting managers: anyone HR has set as someone's Reporting Manager acts as MANAGER for
+  // their direct reports (team-scoped), without a separate role assignment. Removing their last
+  // report removes it again.
+  if (user.employee?.id && !roles.includes('MANAGER' as RoleName)) {
+    const reports = await prisma.employee.count({
+      where: {
+        tenantId: user.tenantId,
+        reportingManagerId: user.employee.id,
+        status: { notIn: ['EXITED', 'ARCHIVED'] },
+      },
+    });
+    if (reports > 0) {
+      roles.push('MANAGER' as RoleName);
+      const managerRole = await prisma.role.findFirst({
+        where: { tenantId: user.tenantId, name: 'MANAGER' },
+        include: { permissions: true },
+      });
+      for (const p of managerRole?.permissions || []) {
+        permissions.push({ permissionKey: p.permissionKey, dataScope: p.dataScope as DataScope, isSensitive: p.isSensitive });
+      }
+      // Employee directory limited to their team even if the role has no explicit grant
+      if (!permissions.some((p) => p.permissionKey === 'employee:read')) {
+        permissions.push({ permissionKey: 'employee:read', dataScope: 'DIRECT_REPORTS' as DataScope, isSensitive: false });
+      }
+    }
+  }
+
   return {
     userId: user.id,
     tenantId: user.tenantId,

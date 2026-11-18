@@ -22,6 +22,16 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 
+const TEAM_TODAY: Record<string, { label: string; cls: string }> = {
+  WORKING: { label: 'Working', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  CLOCKED_OUT: { label: 'Clocked out', cls: 'bg-slate-100 text-slate-700 border-slate-200' },
+  ON_LEAVE: { label: 'On leave', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  LEAVE_PENDING: { label: 'Leave requested', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  ABSENT: { label: 'Absent', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+  NOT_CLOCKED_IN: { label: 'Not clocked in', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+};
+
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const [punchStatus, setPunchStatus] = useState<any>(null);
@@ -33,7 +43,11 @@ export default function DashboardPage() {
   const [punchMessage, setPunchMessage] = useState<string | null>(null);
 
   const activeRole = user?.activeRole || 'EMPLOYEE';
-  const isManagerOrAdmin = ['COMPANY_ADMIN', 'HR_ADMIN', 'MANAGER'].includes(activeRole);
+  const isManagerOrAdmin = ['PLATFORM_SUPER_ADMIN', 'COMPANY_ADMIN', 'HR_ADMIN', 'HR_EXECUTIVE', 'MANAGER'].includes(activeRole);
+  const isManagerView = activeRole === 'MANAGER';
+
+  // My Team: only the employees HR assigned to this user as Reporting Manager
+  const [myTeam, setMyTeam] = useState<{ team: any[]; pendingLeave: number; pendingExpenses: number } | null>(null);
 
   const loadData = async () => {
     try {
@@ -60,12 +74,21 @@ export default function DashboardPage() {
         }
       }
 
-      // 4. Fetch team pending requests if manager or admin
+      // 4. My Team (reporting managers)
+      if (user?.employee?.id) {
+        const tRes = await fetch('/api/team/today');
+        if (tRes.ok) setMyTeam(await tRes.json());
+      }
+
+      // 5. Fetch team pending requests if manager or admin
       if (isManagerOrAdmin) {
         const leaveReqRes = await fetch('/api/leave/requests?view=team');
         if (leaveReqRes.ok) {
           const lrData = await leaveReqRes.json();
-          setTeamRequests(lrData.requests?.filter((r: any) => r.status === 'PENDING') || []);
+          // Own requests are never in your approval queue
+          setTeamRequests(
+            lrData.requests?.filter((r: any) => r.status === 'PENDING' && r.employeeId !== user?.employee?.id) || [],
+          );
         }
 
         const empRes = await fetch('/api/employees');
@@ -394,10 +417,69 @@ export default function DashboardPage() {
         </div>
 
         {/* Manager / Admin Section: Team Approvals & Headcount */}
+        {/* My Team: only employees assigned to me as Reporting Manager */}
+        {myTeam && myTeam.team.length > 0 && (
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+                  <Users className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">My Team ({myTeam.team.length})</h3>
+                  <p className="text-xs text-slate-500">Employees who report to you · today&apos;s attendance</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 text-[11px]">
+                <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  {myTeam.team.filter((m) => m.today === 'WORKING' || m.today === 'CLOCKED_OUT').length} in today
+                </span>
+                <span className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">
+                  {myTeam.team.filter((m) => m.today === 'ON_LEAVE').length} on leave
+                </span>
+                <Link href="/leave" className="px-2 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:underline">
+                  {myTeam.pendingLeave} leave to approve
+                </Link>
+                <Link href="/expenses" className="px-2 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:underline">
+                  {myTeam.pendingExpenses} expenses to approve
+                </Link>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {myTeam.team.map((m) => {
+                const chip = TEAM_TODAY[m.today] || TEAM_TODAY.NOT_CLOCKED_IN;
+                return (
+                  <div key={m.id} className="p-3 rounded-xl border border-slate-100 bg-slate-50/60 flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-slate-900 truncate">{m.name}</div>
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {[m.designation, m.department].filter(Boolean).join(' · ') || m.code}
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        {m.today === 'ON_LEAVE' && m.leaveType
+                          ? m.leaveType
+                          : m.firstCheckIn
+                          ? `In ${format(new Date(m.firstCheckIn), 'hh:mm a')}${m.lastCheckOut ? ` · Out ${format(new Date(m.lastCheckOut), 'hh:mm a')}` : ''}${m.isLate ? ' · Late' : ''}`
+                          : ''}
+                      </div>
+                    </div>
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold border ${chip.cls}`}>{chip.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-3 text-xs">
+              <Link href="/attendance" className="text-emerald-600 font-medium hover:underline">Team attendance →</Link>
+              <Link href="/performance" className="text-emerald-600 font-medium hover:underline">Team goals →</Link>
+              <Link href="/employees" className="text-emerald-600 font-medium hover:underline">Team profiles →</Link>
+            </div>
+          </div>
+        )}
+
         {isManagerOrAdmin && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Team Pending Approvals Queue */}
-            <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+            <div className={`${isManagerView ? 'lg:col-span-3' : 'lg:col-span-2'} bg-white rounded-2xl p-6 border border-slate-200 shadow-sm`}>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
@@ -453,7 +535,8 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Quick Admin Summary */}
+            {/* Quick Admin Summary (HR / owner only) */}
+            {!isManagerView && (
             <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
               <div className="flex items-center gap-2">
                 <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600">
@@ -490,6 +573,7 @@ export default function DashboardPage() {
                 </Link>
               </div>
             </div>
+            )}
           </div>
         )}
       </div>
