@@ -17,6 +17,8 @@ import {
   ArrowRight,
   ShieldAlert,
   ClipboardCheck,
+  Target,
+  FileText,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -105,6 +107,18 @@ export default function DashboardPage() {
       .catch(() => undefined);
   }, [user?.employee?.id]);
 
+  // Goals and review documents shared with the logged-in employee
+  const [perf, setPerf] = useState<{ goals: any[]; documents: any[] } | null>(null);
+  useEffect(() => {
+    if (!user?.employee?.id) return;
+    Promise.all([
+      fetch('/api/performance/goals').then((r) => (r.ok ? r.json() : null)),
+      fetch('/api/performance/documents').then((r) => (r.ok ? r.json() : null)),
+    ])
+      .then(([g, d]) => setPerf({ goals: g?.goals || [], documents: d?.documents || [] }))
+      .catch(() => undefined);
+  }, [user?.employee?.id]);
+
   const handleQuickPunch = async (punchType: 'CHECK_IN' | 'CHECK_OUT') => {
     setPunching(true);
     setPunchMessage(null);
@@ -187,6 +201,61 @@ export default function DashboardPage() {
               {docStatus.uploaded < docStatus.required || docStatus.rejected > 0 ? 'Upload' : 'View'} <ArrowRight className="h-3 w-3" />
             </span>
           </Link>
+        )}
+
+        {/* My goals & review documents (employees) */}
+        {perf && (perf.goals.length > 0 || perf.documents.length > 0) && (
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-purple-50 rounded-lg text-purple-600">
+                  <Target className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800">My Goals & Reviews</h3>
+                  <p className="text-xs text-slate-500">
+                    {perf.goals.length} goal{perf.goals.length === 1 ? '' : 's'} · {perf.documents.length} document
+                    {perf.documents.length === 1 ? '' : 's'} from your manager / HR
+                  </p>
+                </div>
+              </div>
+              <Link href="/performance" className="text-xs text-emerald-600 font-medium hover:underline flex items-center gap-0.5">
+                Open <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2.5">
+                {perf.goals.length === 0 && <div className="text-xs text-slate-400">No goals assigned yet.</div>}
+                {perf.goals.slice(0, 4).map((g) => (
+                  <div key={g.id}>
+                    <div className="flex justify-between text-xs gap-2">
+                      <span className="text-slate-700 font-medium truncate">{g.title}</span>
+                      <span className="font-mono text-emerald-600 shrink-0">{g.progressPercent}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-1.5 mt-1 overflow-hidden">
+                      <div className="bg-emerald-500 h-1.5" style={{ width: `${g.progressPercent}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-1.5">
+                {perf.documents.length === 0 && <div className="text-xs text-slate-400">No documents shared yet.</div>}
+                {perf.documents.slice(0, 4).map((d) => (
+                  <a
+                    key={d.id}
+                    href={`/api/employee-documents/${d.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 p-2 rounded-lg bg-slate-50 hover:bg-purple-50 border border-slate-100 text-xs"
+                  >
+                    <FileText className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                    <span className="text-slate-800 font-medium truncate">{d.title || d.fileName}</span>
+                    <span className="text-[10px] text-slate-400 ml-auto shrink-0">{format(new Date(d.createdAt), 'dd MMM')}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Top Summary Banner / Quick Punch */}

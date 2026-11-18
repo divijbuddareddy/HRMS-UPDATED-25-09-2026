@@ -1390,13 +1390,14 @@ model EmployeeUpload {
   id           String    @id @default(uuid())
   tenantId     String
   employeeId   String
-  docType      String    // AADHAAR, PAN, OFFER_LETTER, OTHER
+  docType      String    // AADHAAR, PAN, OFFER_LETTER, OTHER (onboarding) | PERFORMANCE (shared by HR / manager)
+  title        String?   // e.g. "FY26 Appraisal Letter" (performance documents)
   fileName     String
   mimeType     String
   sizeBytes    Int
   storageKey   String
   checksum     String
-  status       String    @default("SUBMITTED") // SUBMITTED, VERIFIED, REJECTED
+  status       String    @default("SUBMITTED") // SUBMITTED, VERIFIED, REJECTED | SHARED (performance)
   reviewNote   String?
   uploadedById String
   reviewedById String?

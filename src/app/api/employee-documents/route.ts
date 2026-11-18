@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
           workEmail: true,
           joiningDate: true,
           department: { select: { name: true } },
-          uploads: { select: uploadSelect, orderBy: { createdAt: 'desc' } },
+          uploads: { where: { docType: { not: 'PERFORMANCE' } }, select: uploadSelect, orderBy: { createdAt: 'desc' } },
         },
         orderBy: { firstName: 'asc' },
       });
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
         select: { id: true, firstName: true, lastName: true, employeeCode: true },
       }),
       prisma.employeeUpload.findMany({
-        where: { tenantId: user.tenantId, employeeId },
+        where: { tenantId: user.tenantId, employeeId, docType: { not: 'PERFORMANCE' } },
         select: uploadSelect,
         orderBy: { createdAt: 'desc' },
       }),

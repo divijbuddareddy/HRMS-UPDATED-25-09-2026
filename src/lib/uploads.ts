@@ -32,6 +32,24 @@ export function sniffFileType(buf: Buffer): { mime: string; ext: string } | null
   return null;
 }
 
+/**
+ * Performance documents may also be Office files (OKR sheets, review templates).
+ * .xlsx / .docx / .pptx are ZIP containers, so we check the ZIP signature plus the extension.
+ */
+const OFFICE_TYPES: Record<string, string> = {
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+export function sniffPerformanceFile(buf: Buffer, fileName: string): { mime: string; ext: string } | null {
+  const basic = sniffFileType(buf);
+  if (basic) return basic;
+  const ext = (fileName.split('.').pop() || '').toLowerCase();
+  const isZip = buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04;
+  if (isZip && OFFICE_TYPES[ext]) return { mime: OFFICE_TYPES[ext], ext };
+  return null;
+}
+
 /** HR / owner (company-wide) may see and review every employee's documents. */
 export function canReviewDocuments(user: AuthUser): boolean {
   return canCompanyWide(user, 'onboarding:manage') || canCompanyWide(user, 'employees:manage');
