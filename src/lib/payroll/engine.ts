@@ -1,4 +1,5 @@
 import { prisma } from '../prisma';
+import { salaryForPeriod, syncAllSalaryHistories } from './salaries';
 import { AuthUser } from '../types';
 import { createAuditLog } from '../audit';
 import { startOfMonth, endOfMonth, getDaysInMonth, startOfDay, endOfDay } from 'date-fns';
@@ -178,26 +179,11 @@ export interface CalculateEmployeePayrollParams {
 export async function computeEmployeePayrollItem(params: CalculateEmployeePayrollParams) {
   const { tenantId, employeeId, month, year, totalCalendarDays } = params;
 
-  // 1. Fetch current salary assignment
-  const assignment = await prisma.employeeSalaryAssignment.findFirst({
-    where: {
-      tenantId,
-      employeeId,
-      isCurrent: true,
-    },
-    include: {
-      structure: {
-        include: { components: { orderBy: { sortOrder: 'asc' } } },
-      },
-      employee: {
-        include: {
-          branchLocation: true,
-          identity: true,
-          bank: true,
-        },
-      },
-    },
-  });
+  // 1. Salary in force for this month (by effective date, so a revision from next month
+  //    does not change this month's pay)
+  const monthStart = startOfMonth(new Date(year, month - 1, 1));
+  const monthEnd = endOfMonth(new Date(year, month - 1, 1));
+  const assignment = await salaryForPeriod(tenantId, employeeId, monthStart, monthEnd);
 
   if (!assignment) {
     throw new Error(`No salary structure assigned to employee ${employeeId}`);
@@ -244,7 +230,27 @@ export async function computeEmployeePayrollItem(params: CalculateEmployeePayrol
   });
   paidLeaveDays = paidLeaves.reduce((acc, l) => acc + l.totalDays, 0);
 
-  const payableDays = Math.max(0, totalCalendarDays - lopDays);
+  // Only days the person was actually employed this month count: from the joining date
+  // (new joiners) up to an approved last working day (leavers).
+  const DAY = 86400000;
+  const joined = new Date(assignment.employee.joiningDate);
+  joined.setHours(0, 0, 0, 0);
+  let activeStart = joined > startDate ? joined : startDate;
+  let activeEnd = new Date(endDate);
+  const exitReq = await prisma.exitRequest.findFirst({
+    where: { tenantId, employeeId, status: { in: ['APPROVED', 'CLEARANCE_IN_PROGRESS', 'SETTLED'] } },
+    orderBy: { createdAt: 'desc' },
+    select: { approvedLwd: true },
+  });
+  if (exitReq?.approvedLwd) {
+    const lwd = new Date(exitReq.approvedLwd);
+    lwd.setHours(23, 59, 59, 999);
+    if (lwd < activeEnd) activeEnd = lwd;
+  }
+  const employedDays =
+    activeEnd < activeStart ? 0 : Math.round((new Date(activeEnd).setHours(0, 0, 0, 0) - activeStart.getTime()) / DAY) + 1;
+
+  const payableDays = Math.max(0, Math.min(totalCalendarDays, employedDays) - lopDays);
   const payFactor = payableDays / totalCalendarDays;
 
   // 3. Compute Base Monthly CTC and Components
@@ -414,20 +420,22 @@ export async function executePayrollCycleRun(params: {
     });
   }
 
-  // 3. Fetch all active employees assigned with a salary structure
+  // 3. Employees with a salary in force this month who had joined by the month's end
+  await syncAllSalaryHistories(tenantId);
   const activeEmployees = await prisma.employee.findMany({
     where: {
       tenantId,
       status: { in: ['ACTIVE', 'PROBATION', 'CONFIRMED', 'NOTICE'] },
-      salaryAssignments: { some: { isCurrent: true } },
+      joiningDate: { lte: endDate },
+      salaryAssignments: {
+        some: { effectiveFrom: { lte: endDate }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: startDate } }] },
+      },
     },
-    include: {
-      salaryAssignments: { where: { isCurrent: true } },
-    },
+    select: { id: true },
   });
 
   if (activeEmployees.length === 0) {
-    throw new Error('No active employees with assigned salary structures found');
+    throw new Error('No employees have a salary for this month yet. Add salaries in Payroll → Salaries first.');
   }
 
   let totalGross = 0;

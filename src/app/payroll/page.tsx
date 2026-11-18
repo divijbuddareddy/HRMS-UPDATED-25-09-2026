@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
+import { can } from '@/lib/access-policy';
+import { SalariesTab } from '@/components/payroll/SalariesTab';
 import {
   Banknote,
   Calculator,
@@ -27,11 +29,12 @@ import { downloadPayslipPDF } from '@/lib/payroll/payslip-pdf';
 
 export default function PayrollPage() {
   const { user } = useAuth();
+  const canManagePayroll = can(user, 'payroll:manage');
   const [runs, setRuns] = useState<any[]>([]);
   const [selectedRun, setSelectedRun] = useState<any | null>(null);
   const [structures, setStructures] = useState<any[]>([]);
   const [statutoryRules, setStatutoryRules] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<'RUNS' | 'STRUCTURES' | 'STATUTORY'>('RUNS');
+  const [activeTab, setActiveTab] = useState<'RUNS' | 'SALARIES' | 'STRUCTURES' | 'STATUTORY'>('RUNS');
   const [loading, setLoading] = useState(true);
 
   // Month / year selector
@@ -275,8 +278,20 @@ export default function PayrollPage() {
             }`}
           >
             <Calculator className="h-3.5 w-3.5" />
-            Payroll Runs & Payslips
+            {canManagePayroll ? 'Payroll Runs & Payslips' : 'My Payslips'}
           </button>
+          {canManagePayroll && (
+          <button
+            onClick={() => setActiveTab('SALARIES')}
+            className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 ${
+              activeTab === 'SALARIES' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Banknote className="h-3.5 w-3.5" />
+            Salaries
+          </button>
+          )}
+          {canManagePayroll && (
           <button
             onClick={() => setActiveTab('STRUCTURES')}
             className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 ${
@@ -286,6 +301,8 @@ export default function PayrollPage() {
             <FileSpreadsheet className="h-3.5 w-3.5" />
             Salary Structures
           </button>
+          )}
+          {canManagePayroll && (
           <button
             onClick={() => setActiveTab('STATUTORY')}
             className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 ${
@@ -295,12 +312,16 @@ export default function PayrollPage() {
             <ShieldCheck className="h-3.5 w-3.5" />
             Indian Statutory Rules (EPF/ESI/PT/TDS)
           </button>
+          )}
         </div>
+
+        {activeTab === 'SALARIES' && canManagePayroll && <SalariesTab />}
 
         {/* Tab 1: Runs & Payslips */}
         {activeTab === 'RUNS' && (
           <div className="space-y-6">
             {/* Top Control Bar */}
+            {canManagePayroll && (
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
@@ -310,9 +331,9 @@ export default function PayrollPage() {
                     onChange={(e) => setRunMonth(parseInt(e.target.value))}
                     className="p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                   >
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => (
-                      <option key={m} value={m}>
-                        Month {m}
+                    {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((name, i) => (
+                      <option key={name} value={i + 1}>
+                        {name}
                       </option>
                     ))}
                   </select>
@@ -321,8 +342,9 @@ export default function PayrollPage() {
                     onChange={(e) => setRunYear(parseInt(e.target.value))}
                     className="p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                   >
-                    <option value={2026}>2026</option>
-                    <option value={2025}>2025</option>
+                    {[new Date().getFullYear() + 1, new Date().getFullYear(), new Date().getFullYear() - 1].map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -372,6 +394,7 @@ export default function PayrollPage() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Run Financial Summary Cards */}
             {selectedRun && (
