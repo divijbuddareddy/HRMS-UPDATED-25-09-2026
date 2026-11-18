@@ -119,6 +119,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required employee fields' }, { status: 400 });
     }
 
+    if (reportingManagerId) {
+      const mgr = await prisma.employee.findFirst({ where: { id: reportingManagerId, tenantId: user.tenantId }, select: { id: true } });
+      if (!mgr) return NextResponse.json({ error: 'Reporting manager not found' }, { status: 400 });
+    }
+
     // Check duplicate workEmail
     const existing = await prisma.employee.findUnique({
       where: {

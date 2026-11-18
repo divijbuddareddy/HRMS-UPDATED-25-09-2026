@@ -27,6 +27,7 @@ import {
   X,
   ClipboardCheck,
   FolderOpen,
+  Network,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -60,6 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       href: '/employees',
       icon: Users,
     },
+    { label: 'Org Chart', href: '/org-chart', icon: Network },
     { label: 'Attendance', href: '/attendance', icon: Clock },
     { label: 'Leave Ledger', href: '/leave', icon: CalendarCheck },
     // Employees see their own payslips on the payroll page (runs are filtered server-side).

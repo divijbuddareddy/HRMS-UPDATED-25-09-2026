@@ -418,6 +418,7 @@ export default function EmployeesPage() {
       designationId: emp.designationId,
       branchLocationId: emp.branchLocationId,
       status: emp.status,
+      reportingManagerId: emp.reportingManagerId || '',
       panNumber: emp.identity?.panNumber || '',
       aadhaarNumber: emp.identity?.aadhaarNumber || '',
       bankAccountNumber: emp.bank?.accountNumber || '',
@@ -1172,6 +1173,26 @@ Amit,Kapoor,amit.kapoor@yourcompany.com,,9876543210,Male,2026-01-15,${companyCod
                       <option value="NOTICE">NOTICE</option>
                       <option value="EXITED">EXITED</option>
                     </select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="font-medium text-slate-700 block mb-1">Reporting Manager</label>
+                    <select
+                      value={editFormData.reportingManagerId || ''}
+                      onChange={(e) => setEditFormData({ ...editFormData, reportingManagerId: e.target.value })}
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                    >
+                      <option value="">— None (top of the organization chart) —</option>
+                      {employees
+                        .filter((m) => m.id !== editFormData.id && m.status !== 'EXITED')
+                        .map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.firstName} {m.lastName} ({m.employeeCode}){m.designation?.title ? ` · ${m.designation.title}` : ''}
+                          </option>
+                        ))}
+                    </select>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Used for the organization chart and for manager approvals (leave, attendance, goals).
+                    </p>
                   </div>
                 </div>
 

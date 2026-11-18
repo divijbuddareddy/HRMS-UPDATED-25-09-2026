@@ -79,6 +79,35 @@ export async function PUT(
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
     }
 
+    // Reporting manager: '' / null clears it; otherwise must be another employee of this company,
+    // and must not create a loop (A reports to B who reports to A).
+    if (body.reportingManagerId !== undefined) {
+      body.reportingManagerId = body.reportingManagerId || null;
+      if (body.reportingManagerId) {
+        if (body.reportingManagerId === id) {
+          return NextResponse.json({ error: 'An employee cannot report to themselves.' }, { status: 400 });
+        }
+        const all = await prisma.employee.findMany({
+          where: { tenantId: user.tenantId },
+          select: { id: true, reportingManagerId: true },
+        });
+        const managerOf = new Map(all.map((e) => [e.id, e.reportingManagerId]));
+        if (!managerOf.has(body.reportingManagerId)) {
+          return NextResponse.json({ error: 'Reporting manager not found.' }, { status: 400 });
+        }
+        let cursor: string | null | undefined = body.reportingManagerId;
+        for (let i = 0; cursor && i < all.length + 1; i++) {
+          if (cursor === id) {
+            return NextResponse.json(
+              { error: 'That would create a loop: the chosen manager already reports (directly or indirectly) to this employee.' },
+              { status: 400 },
+            );
+          }
+          cursor = managerOf.get(cursor);
+        }
+      }
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       const emp = await tx.employee.update({
         where: { id },
