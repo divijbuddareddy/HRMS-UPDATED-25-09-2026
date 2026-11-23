@@ -84,7 +84,14 @@ export async function GET(req: NextRequest) {
           ...empFilter,
           punchTimestamp: { gte: startDate, lte: endDate },
         },
-        include: { employee: empSelect },
+        include: {
+          employee: {
+            select: {
+              ...empSelect.select,
+              branchLocation: { select: { name: true, latitude: true, longitude: true, geofenceRadiusMeters: true } },
+            },
+          },
+        },
         orderBy: { punchTimestamp: 'desc' },
       }),
       prisma.employee.findMany({

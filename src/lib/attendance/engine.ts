@@ -50,19 +50,25 @@ export async function recordRawAttendancePunch(params: RecordPunchParams) {
     throw new Error('Employee not found');
   }
 
+  // Verification status of the punch location:
+  //   VERIFIED            inside the employee's office radius
+  //   GEOFENCE_WARNING    outside the office radius
+  //   NO_OFFICE_LOCATION  punch has a location, but the employee's office has no coordinates set
+  //   NO_LOCATION         punch has no location (hardware devices only; self-service punches require one)
+  const hasPunchLocation = params.latitude != null && params.longitude != null;
+  const office = employee.branchLocation;
+  const hasOffice = office?.latitude != null && office?.longitude != null;
   let isGeofenced = true;
-  if (
-    params.latitude != null &&
-    params.longitude != null &&
-    employee.branchLocation?.latitude != null &&
-    employee.branchLocation?.longitude != null
-  ) {
+  let verificationStatus = 'NO_LOCATION';
+  if (hasPunchLocation && hasOffice) {
     const dist = calculateHaversineDistance(
-      { latitude: params.latitude, longitude: params.longitude },
-      { latitude: employee.branchLocation.latitude, longitude: employee.branchLocation.longitude }
+      { latitude: params.latitude!, longitude: params.longitude! },
+      { latitude: office!.latitude!, longitude: office!.longitude! }
     );
-    const maxRadius = employee.branchLocation.geofenceRadiusMeters || 200;
-    isGeofenced = dist <= maxRadius;
+    isGeofenced = dist <= (office!.geofenceRadiusMeters || 200);
+    verificationStatus = isGeofenced ? 'VERIFIED' : 'GEOFENCE_WARNING';
+  } else if (hasPunchLocation) {
+    verificationStatus = 'NO_OFFICE_LOCATION';
   }
 
   const punchTimestamp = params.timestamp || new Date();
@@ -81,7 +87,7 @@ export async function recordRawAttendancePunch(params: RecordPunchParams) {
       isGeofenced,
       selfieUrl: params.selfieUrl,
       ipAddress: params.ipAddress,
-      verificationStatus: isGeofenced ? 'VERIFIED' : 'GEOFENCE_WARNING',
+      verificationStatus,
     },
   });
 
