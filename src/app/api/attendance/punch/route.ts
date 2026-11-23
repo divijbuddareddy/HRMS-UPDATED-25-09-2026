@@ -4,6 +4,7 @@ import { recordRawAttendancePunch } from '@/lib/attendance/engine';
 import { prisma } from '@/lib/prisma';
 import { startOfDay, endOfDay } from 'date-fns';
 import { forbidden } from '@/lib/access';
+import { isValidCoordinate } from '@/lib/geo';
 
 export async function GET(req: NextRequest) {
   try {
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
     const todayStart = startOfDay(new Date());
     const todayEnd = endOfDay(new Date());
 
-    const [todayRecord, rawPunches, shift] = await Promise.all([
+    const [todayRecord, rawPunches, shift, me] = await Promise.all([
       prisma.dailyAttendanceRecord.findUnique({
         where: {
           tenantId_employeeId_date: {
@@ -38,6 +39,12 @@ export async function GET(req: NextRequest) {
       prisma.shiftPolicy.findFirst({
         where: { tenantId: user.tenantId, isDefault: true },
       }),
+      prisma.employee.findFirst({
+        where: { id: user.employeeId, tenantId: user.tenantId },
+        select: {
+          branchLocation: { select: { name: true, latitude: true, longitude: true, geofenceRadiusMeters: true } },
+        },
+      }),
     ]);
 
     const hasCheckedIn = rawPunches.some((p) => p.punchType === 'CHECK_IN');
@@ -47,6 +54,7 @@ export async function GET(req: NextRequest) {
       todayRecord,
       rawPunches,
       shift,
+      office: me?.branchLocation || null,
       hasCheckedIn,
       hasCheckedOut,
       nextAction: !hasCheckedIn ? 'CHECK_IN' : !hasCheckedOut ? 'CHECK_OUT' : 'COMPLETED',
@@ -99,16 +107,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'You have already clocked out today.' }, { status: 409 });
     }
 
-    const clientIp = req.headers.get('x-forwarded-for') || '192.168.1.140';
+    // Location is mandatory for every self-service punch: no location, no punch (no default coordinates).
+    if (!isValidCoordinate(latitude, longitude)) {
+      return NextResponse.json(
+        {
+          error: 'Your location is required to clock in or out. Please allow location access for this site and try again.',
+          code: 'LOCATION_REQUIRED',
+        },
+        { status: 400 },
+      );
+    }
+    const acc = accuracy != null && Number.isFinite(parseFloat(accuracy)) ? Math.max(0, parseFloat(accuracy)) : null;
+
+    const clientIp =
+      req.headers.get('x-forwarded-for')?.split(',')[0].trim() || req.headers.get('x-real-ip') || undefined;
 
     const punch = await recordRawAttendancePunch({
       tenantId: user.tenantId,
       employeeId: targetEmployeeId,
       punchType,
       deviceType: deviceType || 'WEB',
-      latitude: latitude != null ? parseFloat(latitude) : 12.9716,
-      longitude: longitude != null ? parseFloat(longitude) : 77.5946,
-      accuracy: accuracy != null ? parseFloat(accuracy) : 5,
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude),
+      accuracy: acc ?? undefined,
       selfieUrl,
       ipAddress: clientIp,
     });

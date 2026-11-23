@@ -35,6 +35,8 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
+import { getPunchLocation, LocationError } from '@/lib/geo';
+import { PunchLocation, PunchLocationStatus, LocationRequirementNote } from '@/components/attendance/PunchLocation';
 
 interface IoTTerminal {
   id: string;
@@ -141,6 +143,7 @@ export default function AttendancePage() {
   const [punchStatus, setPunchStatus] = useState<any>(null);
   const [punching, setPunching] = useState(false);
   const [punchMsg, setPunchMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [locationCheck, setLocationCheck] = useState(0);
 
   // Regularize modal
   const [isRegModalOpen, setIsRegModalOpen] = useState(false);
@@ -206,27 +209,21 @@ export default function AttendancePage() {
     fetchAttendance();
   });
 
-  // Handle standard Web Punch with live GPS detection & fallback
+  // Web punch: the employee's real location is mandatory (no fallback location).
   const handlePunch = async (punchType: 'CHECK_IN' | 'CHECK_OUT') => {
     setPunching(true);
     setPunchMsg(null);
 
-    let lat = 12.9716;
-    let lng = 77.5946;
-    let acc = 10;
-
-    if (typeof window !== 'undefined' && 'geolocation' in navigator) {
-      try {
-        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4000, enableHighAccuracy: true });
-        });
-        lat = pos.coords.latitude;
-        lng = pos.coords.longitude;
-        acc = pos.coords.accuracy || 10;
-      } catch (geoErr) {
-        // Fallback to headquarters coordinates if permission denied or timeout
-      }
+    let loc;
+    try {
+      loc = await getPunchLocation();
+    } catch (e: any) {
+      setPunchMsg({ type: 'error', text: e instanceof LocationError ? e.message : 'Your location could not be found. Please try again.' });
+      setLocationCheck((n) => n + 1);
+      setPunching(false);
+      return;
     }
+    setLocationCheck((n) => n + 1);
 
     try {
       const res = await fetch('/api/attendance/punch', {
@@ -235,9 +232,9 @@ export default function AttendancePage() {
         body: JSON.stringify({
           punchType,
           deviceType: 'WEB',
-          latitude: lat,
-          longitude: lng,
-          accuracy: acc,
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          accuracy: loc.accuracy,
         }),
       });
       const data = await res.json();
@@ -269,6 +266,16 @@ export default function AttendancePage() {
 
       const targetEmp = terminalEmployeeId || (selectedEmployeeId !== 'ALL' ? selectedEmployeeId : '') || user?.employee?.id;
 
+      // Same rule as web punches: the real location is required.
+      let loc;
+      try {
+        loc = await getPunchLocation();
+      } catch (e: any) {
+        setScanResult({ status: 'ERROR', message: e instanceof LocationError ? e.message : 'Your location could not be found.' });
+        setLocationCheck((n) => n + 1);
+        return;
+      }
+
       const res = await fetch('/api/attendance/punch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -276,9 +283,9 @@ export default function AttendancePage() {
           punchType,
           deviceType: selectedTerminal.deviceType,
           employeeId: targetEmp,
-          latitude: 12.9716,
-          longitude: 77.5946,
-          accuracy: 5,
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          accuracy: loc.accuracy,
         }),
       });
 
@@ -732,8 +739,8 @@ export default function AttendancePage() {
                       <th className="py-3 px-4">Date & Day</th>
                       {isTeamView && <th className="py-3 px-4">Employee</th>}
                       <th className="py-3 px-4">Shift & Policy</th>
-                      <th className="py-3 px-4">First In (Punch)</th>
-                      <th className="py-3 px-4">Last Out (Punch)</th>
+                      <th className="py-3 px-4">Clock In & Location</th>
+                      <th className="py-3 px-4">Clock Out & Location</th>
                       <th className="py-3 px-4">Total Worked</th>
                       <th className="py-3 px-4">Status</th>
                       <th className="py-3 px-4">Punch Source</th>
@@ -754,6 +761,9 @@ export default function AttendancePage() {
                           (p) => p.employeeId === r.employeeId && format(new Date(p.punchTimestamp), 'yyyy-MM-dd') === dayKey,
                         );
                         const sources = Array.from(new Set(dayPunches.map((p) => p.deviceType || 'WEB'))) as string[];
+                        // rawPunches are newest first: first clock-in = last CHECK_IN in the list, last clock-out = first CHECK_OUT
+                        const inPunch = [...dayPunches].reverse().find((p) => p.punchType === 'CHECK_IN');
+                        const outPunch = dayPunches.find((p) => p.punchType === 'CHECK_OUT');
                         return (
                           <tr key={r.id} className="hover:bg-slate-50/70 font-sans transition-colors">
                             <td className="py-3 px-4 font-medium text-slate-900">
@@ -779,23 +789,29 @@ export default function AttendancePage() {
                               <span className="block text-[11px] text-slate-400 font-mono">{r.shift ? `${r.shift.startTime} – ${r.shift.endTime}` : '10:00 – 18:00'}</span>
                             </td>
 
-                            <td className="py-3 px-4 font-mono font-medium text-slate-800">
+                            <td className="py-3 px-4 font-mono font-medium text-slate-800 align-top">
                               {r.firstCheckIn ? (
-                                <span className="inline-flex items-center gap-1">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                  {format(new Date(r.firstCheckIn), 'hh:mm:ss a')}
-                                </span>
+                                <div className="space-y-1">
+                                  <span className="inline-flex items-center gap-1">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                    {format(new Date(r.firstCheckIn), 'hh:mm:ss a')}
+                                  </span>
+                                  {inPunch && <PunchLocation punch={inPunch} office={inPunch.employee?.branchLocation} compact />}
+                                </div>
                               ) : (
                                 <span className="text-slate-300">—</span>
                               )}
                             </td>
 
-                            <td className="py-3 px-4 font-mono font-medium text-slate-800">
+                            <td className="py-3 px-4 font-mono font-medium text-slate-800 align-top">
                               {r.lastCheckOut ? (
-                                <span className="inline-flex items-center gap-1">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                                  {format(new Date(r.lastCheckOut), 'hh:mm:ss a')}
-                                </span>
+                                <div className="space-y-1">
+                                  <span className="inline-flex items-center gap-1">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                                    {format(new Date(r.lastCheckOut), 'hh:mm:ss a')}
+                                  </span>
+                                  {outPunch && <PunchLocation punch={outPunch} office={outPunch.employee?.branchLocation} compact />}
+                                </div>
                               ) : (
                                 <span className="text-slate-300">—</span>
                               )}
@@ -1061,12 +1077,10 @@ export default function AttendancePage() {
                     Web Geofenced Clock
                   </h4>
                   <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-700 font-semibold rounded-full border border-blue-200">
-                    Geofenced 200m
+                    Location required
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-500">
-                  Alternative clock-in directly from the HRMS browser dashboard with GPS coordinate verification.
-                </p>
+                <LocationRequirementNote refreshKey={locationCheck} />
 
                 {punchMsg && (
                   <div
@@ -1192,23 +1206,14 @@ export default function AttendancePage() {
                             </div>
                           </td>
 
-                          <td className="py-3 px-4 text-slate-600">{punch.ipAddress || '192.168.1.140'}</td>
+                          <td className="py-3 px-4 text-slate-600">{punch.ipAddress || '—'}</td>
 
                           <td className="py-3 px-4 text-slate-600">
-                            {punch.latitude && punch.longitude ? (
-                              <span className="text-[11px] text-slate-500">
-                                {punch.latitude.toFixed(4)}° N, {punch.longitude.toFixed(4)}° E (±{punch.accuracy || 5}m)
-                              </span>
-                            ) : (
-                              <span className="text-slate-400">HQ Geofence (12.9716, 77.5946)</span>
-                            )}
+                            <PunchLocation punch={punch} office={punch.employee?.branchLocation} />
                           </td>
 
                           <td className="py-3 px-4">
-                            <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold text-[11px]">
-                              <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-                              VERIFIED
-                            </span>
+                            <PunchLocationStatus punch={punch} />
                           </td>
                         </tr>
                       ))}

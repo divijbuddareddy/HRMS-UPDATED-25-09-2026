@@ -21,6 +21,8 @@ import {
   FileText,
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { getPunchLocation, LocationError } from '@/lib/geo';
+import { PunchLocation, LocationRequirementNote } from '@/components/attendance/PunchLocation';
 
 const TEAM_TODAY: Record<string, { label: string; cls: string }> = {
   WORKING: { label: 'Working', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -41,6 +43,7 @@ export default function DashboardPage() {
   const [employeesCount, setEmployeesCount] = useState<number>(0);
   const [punching, setPunching] = useState(false);
   const [punchMessage, setPunchMessage] = useState<string | null>(null);
+  const [locationCheck, setLocationCheck] = useState(0);
 
   const activeRole = user?.activeRole || 'EMPLOYEE';
   const isManagerOrAdmin = ['PLATFORM_SUPER_ADMIN', 'COMPANY_ADMIN', 'HR_ADMIN', 'HR_EXECUTIVE', 'MANAGER'].includes(activeRole);
@@ -146,15 +149,26 @@ export default function DashboardPage() {
     setPunching(true);
     setPunchMessage(null);
     try {
+      // Location is mandatory: if the employee blocks it, nothing is sent.
+      let loc;
+      try {
+        setPunchMessage('Getting your location…');
+        loc = await getPunchLocation();
+      } catch (e: any) {
+        setPunchMessage(e instanceof LocationError ? e.message : 'Your location could not be found. Please try again.');
+        setLocationCheck((n) => n + 1);
+        return;
+      }
+      setLocationCheck((n) => n + 1);
       const res = await fetch('/api/attendance/punch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           punchType,
           deviceType: 'WEB',
-          latitude: 12.9716, // Indiranagar HQ coords
-          longitude: 77.5946,
-          accuracy: 10,
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          accuracy: loc.accuracy,
         }),
       });
       const data = await res.json();
@@ -296,27 +310,24 @@ export default function DashboardPage() {
                 </div>
               </div>
               <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                <MapPin className="h-3 w-3" /> Geofenced
+                <MapPin className="h-3 w-3" /> Location on
               </span>
             </div>
 
-            <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100 mb-4 text-xs space-y-1.5">
-              <div className="flex justify-between text-slate-600">
-                <span>Check-In:</span>
-                <span className="font-semibold text-slate-900 font-mono">
-                  {punchStatus?.todayRecord?.firstCheckIn
-                    ? format(new Date(punchStatus.todayRecord.firstCheckIn), 'hh:mm a')
-                    : '—'}
-                </span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>Check-Out:</span>
-                <span className="font-semibold text-slate-900 font-mono">
-                  {punchStatus?.todayRecord?.lastCheckOut
-                    ? format(new Date(punchStatus.todayRecord.lastCheckOut), 'hh:mm a')
-                    : '—'}
-                </span>
-              </div>
+            <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100 mb-3 text-xs space-y-2">
+              {(['CHECK_IN', 'CHECK_OUT'] as const).map((type) => {
+                const punch = (punchStatus?.rawPunches || []).find((p: any) => p.punchType === type);
+                const time = type === 'CHECK_IN' ? punchStatus?.todayRecord?.firstCheckIn : punchStatus?.todayRecord?.lastCheckOut;
+                return (
+                  <div key={type} className="space-y-1">
+                    <div className="flex justify-between text-slate-600">
+                      <span>{type === 'CHECK_IN' ? 'Check-In:' : 'Check-Out:'}</span>
+                      <span className="font-semibold text-slate-900 font-mono">{time ? format(new Date(time), 'hh:mm a') : '—'}</span>
+                    </div>
+                    {punch && <PunchLocation punch={punch} office={punchStatus?.office} compact />}
+                  </div>
+                );
+              })}
               <div className="flex justify-between text-slate-600">
                 <span>Shift Status:</span>
                 <span className="font-semibold text-emerald-600">
@@ -324,6 +335,12 @@ export default function DashboardPage() {
                 </span>
               </div>
             </div>
+
+            {!punchStatus?.hasCheckedOut && (
+              <div className="mb-3">
+                <LocationRequirementNote refreshKey={locationCheck} />
+              </div>
+            )}
 
             {punchMessage && (
               <div className="mb-3 text-xs p-2 rounded bg-slate-100 text-slate-800 border border-slate-200 font-medium">
