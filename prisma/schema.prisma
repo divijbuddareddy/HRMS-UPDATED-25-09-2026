@@ -311,6 +311,7 @@ model Employee {
   assetAssignments    AssetAssignment[]
   exitRequests        ExitRequest[]
   uploads             EmployeeUpload[]
+  skills              EmployeeSkill[]
   adoptedSignature    AdoptedSignature?
 
   @@unique([tenantId, employeeCode])
@@ -1421,6 +1422,24 @@ model EmployeeUpload {
   employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, employeeId])
+}
+
+// Skills an employee adds on their dashboard; HR / owner search them in the Skills Directory.
+model EmployeeSkill {
+  id         String   @id @default(uuid())
+  tenantId   String
+  employeeId String
+  name       String   // as typed, e.g. "React"
+  nameKey    String   // lower-cased, single-spaced, used for matching / de-duplication
+  level      String   @default("INTERMEDIATE") // BEGINNER, INTERMEDIATE, ADVANCED, EXPERT
+  years      Float?   // optional years of experience
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, nameKey])
+  @@index([tenantId, nameKey])
 }
 
 // A signature the employee "adopted" once (drawn / typed / uploaded) and reuses to sign documents.
