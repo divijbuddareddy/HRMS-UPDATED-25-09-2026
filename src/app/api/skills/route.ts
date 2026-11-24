@@ -85,7 +85,8 @@ export async function POST(req: NextRequest) {
     const skill = existing
       ? await prisma.employeeSkill.update({
           where: { id: existing.id },
-          data: { name: parsed.name, level: parsed.level, years: parsed.years },
+          // Re-adding keeps the original spelling ("react" won't overwrite "React"); renames go through PATCH.
+          data: { level: parsed.level, years: parsed.years },
           select: skillSelect,
         })
       : await prisma.employeeSkill.create({
