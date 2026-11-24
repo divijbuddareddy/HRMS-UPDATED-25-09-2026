@@ -110,3 +110,97 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+
+/**
+ * Submit the whole skill list at once: { skills: [{ id?, name, level, years? }], employeeId? (HR only) }.
+ * Rows with an id of an existing skill keep it (renames allowed); rows left out are removed.
+ */
+export async function PUT(req: NextRequest) {
+  try {
+    const user = await getAuthenticatedUser(req);
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const body = await req.json().catch(() => null);
+    const employeeId = resolveEmployeeId(user, body?.employeeId, canManageSkills(user));
+    if (employeeId === 'FORBIDDEN') return forbidden('You can only submit your own skills.');
+    if (!employeeId) {
+      return NextResponse.json({ error: 'Your login is not linked to an employee profile.' }, { status: 400 });
+    }
+    if (!Array.isArray(body?.skills)) {
+      return NextResponse.json({ error: 'Send the list of skills.' }, { status: 400 });
+    }
+    if (body.skills.length > MAX_SKILLS_PER_EMPLOYEE) {
+      return NextResponse.json({ error: `You can add up to ${MAX_SKILLS_PER_EMPLOYEE} skills.` }, { status: 400 });
+    }
+
+    const rows: { id?: string; name: string; nameKey: string; level: string; years: number | null }[] = [];
+    const seen = new Map<string, string>();
+    for (const [i, raw] of (body.skills as any[]).entries()) {
+      const parsed = parseSkillInput(raw);
+      if ('error' in parsed) {
+        return NextResponse.json({ error: `Skill ${i + 1}: ${parsed.error}`, index: i }, { status: 400 });
+      }
+      if (seen.has(parsed.nameKey)) {
+        return NextResponse.json(
+          { error: `"${parsed.name}" is listed twice. Remove one of them.`, index: i },
+          { status: 400 },
+        );
+      }
+      seen.set(parsed.nameKey, parsed.name);
+      rows.push({ id: typeof raw?.id === 'string' ? raw.id : undefined, ...parsed });
+    }
+
+    const employee = await prisma.employee.findFirst({
+      where: { id: employeeId, tenantId: user.tenantId },
+      select: { id: true },
+    });
+    if (!employee) return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
+
+    const before = await prisma.employeeSkill.findMany({ where: { tenantId: user.tenantId, employeeId } });
+    const beforeById = new Map(before.map((s) => [s.id, s]));
+
+    // Replace the list in one transaction; existing rows keep their id and creation date.
+    const usedIds = new Set<string>();
+    await prisma.$transaction([
+      prisma.employeeSkill.deleteMany({ where: { tenantId: user.tenantId, employeeId } }),
+      ...rows.map((r) => {
+        const prev = r.id && !usedIds.has(r.id) ? beforeById.get(r.id) : undefined;
+        if (prev) usedIds.add(prev.id);
+        return prisma.employeeSkill.create({
+          data: {
+            ...(prev ? { id: prev.id, createdAt: prev.createdAt } : {}),
+            tenantId: user.tenantId,
+            employeeId,
+            name: r.name,
+            nameKey: r.nameKey,
+            level: r.level,
+            years: r.years,
+          },
+        });
+      }),
+    ]);
+
+    const skills = await prisma.employeeSkill.findMany({
+      where: { tenantId: user.tenantId, employeeId },
+      select: skillSelect,
+      orderBy: { name: 'asc' },
+    });
+
+    const summary = (list: { name: string; level: string; years: number | null }[]) =>
+      list.map((s) => `${s.name} (${s.level}${s.years != null ? `, ${s.years}y` : ''})`);
+    await createAuditLog({
+      tenantId: user.tenantId,
+      actorId: user.userId,
+      actorRole: user.roles[0],
+      action: 'SUBMIT_EMPLOYEE_SKILLS',
+      entityType: 'EMPLOYEE',
+      entityId: employeeId,
+      beforeState: { skills: summary(before) },
+      afterState: { skills: summary(skills) },
+    });
+
+    return NextResponse.json({ success: true, skills });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { Award, Plus, X, Pencil, Check, Loader2 } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Award, Plus, Trash2, Loader2, Send, RotateCcw } from 'lucide-react';
 import { SKILL_LEVELS, SKILL_LEVEL_LABEL, SkillLevel } from '@/lib/skills';
+import { format } from 'date-fns';
 
-type Skill = { id: string; name: string; level: SkillLevel; years: number | null };
+type Skill = { id: string; name: string; level: SkillLevel; years: number | null; updatedAt?: string };
+type Row = { key: string; id?: string; name: string; level: SkillLevel; years: string };
 
 export const LEVEL_CHIP: Record<SkillLevel, string> = {
   BEGINNER: 'bg-slate-50 text-slate-700 border-slate-200',
@@ -13,26 +15,39 @@ export const LEVEL_CHIP: Record<SkillLevel, string> = {
   EXPERT: 'bg-purple-50 text-purple-700 border-purple-200',
 };
 
-/** Dashboard card where the logged-in employee keeps their skill set. Saved instantly. */
+let rowSeq = 0;
+const newKey = () => `row-${++rowSeq}`;
+const toRows = (skills: Skill[]): Row[] =>
+  skills.map((s) => ({ key: newKey(), id: s.id, name: s.name, level: s.level, years: s.years == null ? '' : String(s.years) }));
+const blankRow = (): Row => ({ key: newKey(), name: '', level: 'INTERMEDIATE', years: '' });
+const norm = (v: string) => v.replace(/\s+/g, ' ').trim();
+const signature = (rows: Row[]) =>
+  JSON.stringify(
+    rows
+      .filter((r) => norm(r.name))
+      .map((r) => [r.id || '', norm(r.name), r.level, r.years === '' ? '' : String(Number(r.years))]),
+  );
+
+/**
+ * Dashboard card where the logged-in employee edits their skill set and submits it.
+ * Nothing is saved until Submit; HR, managers and the owner see the last submitted list.
+ */
 export function MySkillsCard() {
-  const [skills, setSkills] = useState<Skill[]>([]);
+  const [saved, setSaved] = useState<Skill[]>([]);
+  const [rows, setRows] = useState<Row[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [name, setName] = useState('');
-  const [level, setLevel] = useState<SkillLevel>('INTERMEDIATE');
-  const [years, setYears] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editLevel, setEditLevel] = useState<SkillLevel>('INTERMEDIATE');
-  const [editYears, setEditYears] = useState('');
+  const [errorKey, setErrorKey] = useState<string | null>(null);
 
   const load = async () => {
     try {
       const res = await fetch('/api/skills');
       const data = await res.json();
       if (res.ok) {
-        setSkills(data.skills || []);
+        setSaved(data.skills || []);
+        setRows(data.skills?.length ? toRows(data.skills) : [blankRow()]);
         setSuggestions(data.suggestions || []);
       }
     } finally {
@@ -44,188 +59,216 @@ export function MySkillsCard() {
     load();
   }, []);
 
-  const add = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setSaving(true);
+  const dirty = useMemo(() => signature(rows) !== signature(toRows(saved)), [rows, saved]);
+
+  // Warn before leaving the page with unsubmitted changes.
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
+
+  const update = (key: string, patch: Partial<Row>) => {
+    setRows((list) => list.map((r) => (r.key === key ? { ...r, ...patch } : r)));
     setMessage(null);
+    setErrorKey(null);
+  };
+  const removeRow = (key: string) => {
+    setRows((list) => {
+      const next = list.filter((r) => r.key !== key);
+      return next.length ? next : [blankRow()];
+    });
+    setMessage(null);
+    setErrorKey(null);
+  };
+  const addRow = () => setRows((list) => [...list, blankRow()]);
+
+  const discard = () => {
+    setRows(saved.length ? toRows(saved) : [blankRow()]);
+    setMessage(null);
+    setErrorKey(null);
+  };
+
+  const submit = async () => {
+    const filled = rows.filter((r) => norm(r.name));
+    // Client-side checks so the employee sees the problem next to the row.
+    const seen = new Set<string>();
+    for (const r of filled) {
+      const k = norm(r.name).toLowerCase();
+      if (seen.has(k)) {
+        setErrorKey(r.key);
+        setMessage({ ok: false, text: `"${norm(r.name)}" is listed twice. Remove one of them.` });
+        return;
+      }
+      seen.add(k);
+      if (r.years !== '' && (Number(r.years) < 0 || Number(r.years) > 60 || !Number.isFinite(Number(r.years)))) {
+        setErrorKey(r.key);
+        setMessage({ ok: false, text: `Years for "${norm(r.name)}" must be between 0 and 60.` });
+        return;
+      }
+    }
+
+    setSubmitting(true);
+    setMessage(null);
+    setErrorKey(null);
     try {
       const res = await fetch('/api/skills', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, level, years: years === '' ? null : years }),
+        body: JSON.stringify({
+          skills: filled.map((r) => ({ id: r.id, name: norm(r.name), level: r.level, years: r.years === '' ? null : r.years })),
+        }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not save the skill');
-      setMessage({ ok: true, text: data.updated ? `Updated "${data.skill.name}".` : `Added "${data.skill.name}".` });
-      setName('');
-      setYears('');
-      await load();
+      if (!res.ok) {
+        if (typeof data.index === 'number' && filled[data.index]) setErrorKey(filled[data.index].key);
+        throw new Error(data.error || 'Could not submit your skills');
+      }
+      setSaved(data.skills);
+      setRows(data.skills.length ? toRows(data.skills) : [blankRow()]);
+      setMessage({ ok: true, text: `Submitted. ${data.skills.length} skill${data.skills.length === 1 ? '' : 's'} saved.` });
     } catch (err: any) {
       setMessage({ ok: false, text: err.message });
     } finally {
-      setSaving(false);
+      setSubmitting(false);
     }
   };
 
-  const remove = async (s: Skill) => {
-    if (!confirm(`Remove "${s.name}" from your skills?`)) return;
-    const res = await fetch(`/api/skills/${s.id}`, { method: 'DELETE' });
-    if (res.ok) {
-      setSkills((list) => list.filter((x) => x.id !== s.id));
-    } else {
-      const d = await res.json().catch(() => ({}));
-      setMessage({ ok: false, text: d.error || 'Could not remove the skill' });
-    }
-  };
-
-  const startEdit = (s: Skill) => {
-    setEditId(s.id);
-    setEditLevel(s.level);
-    setEditYears(s.years == null ? '' : String(s.years));
-  };
-
-  const saveEdit = async (s: Skill) => {
-    const res = await fetch(`/api/skills/${s.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ level: editLevel, years: editYears === '' ? null : editYears }),
-    });
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setMessage({ ok: false, text: d.error || 'Could not update the skill' });
-      return;
-    }
-    setSkills((list) => list.map((x) => (x.id === s.id ? d.skill : x)));
-    setEditId(null);
-  };
-
-  const mine = new Set(skills.map((s) => s.name.toLowerCase()));
+  const lastSubmitted = saved.reduce<string | null>(
+    (max, s) => (s.updatedAt && (!max || s.updatedAt > max) ? s.updatedAt : max),
+    null,
+  );
+  const used = new Set(rows.map((r) => norm(r.name).toLowerCase()));
 
   return (
     <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-      <div className="flex items-center gap-2 mb-3">
-        <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
-          <Award className="h-5 w-5" />
+      <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2">
+          <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
+            <Award className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">My Skills</h3>
+            <p className="text-xs text-slate-500">
+              Edit your skills and click Submit. Only you, HR, managers and the company owner can see them.
+            </p>
+          </div>
         </div>
-        <div>
-          <h3 className="text-sm font-semibold text-slate-800">My Skills</h3>
-          <p className="text-xs text-slate-500">
-            Add the skills you have so HR can find you for the right projects. Only you, HR, managers and the company owner can see them.
-          </p>
+        <div className="text-[11px] text-right">
+          {dirty ? (
+            <span className="inline-block bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2 py-0.5 font-medium">
+              Unsaved changes
+            </span>
+          ) : lastSubmitted ? (
+            <span className="text-slate-400">Last submitted {format(new Date(lastSubmitted), 'dd MMM yyyy, h:mm a')}</span>
+          ) : null}
         </div>
       </div>
 
-      <form onSubmit={add} className="flex flex-wrap items-end gap-2">
-        <div className="flex-1 min-w-[160px]">
-          <label className="text-[11px] font-medium text-slate-500 block mb-1">Skill</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            list="skill-suggestions"
-            maxLength={60}
-            placeholder="e.g. Excel, React, Tally, Sales"
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
-          />
+      {loading ? (
+        <div className="text-xs text-slate-400">Loading…</div>
+      ) : (
+        <>
           <datalist id="skill-suggestions">
             {suggestions
-              .filter((s) => !mine.has(s.toLowerCase()))
+              .filter((s) => !used.has(s.toLowerCase()))
               .map((s) => (
                 <option key={s} value={s} />
               ))}
           </datalist>
-        </div>
-        <div>
-          <label className="text-[11px] font-medium text-slate-500 block mb-1">Level</label>
-          <select
-            value={level}
-            onChange={(e) => setLevel(e.target.value as SkillLevel)}
-            className="text-sm border border-slate-200 rounded-lg px-2 py-2 bg-white"
-          >
-            {SKILL_LEVELS.map((l) => (
-              <option key={l} value={l}>
-                {SKILL_LEVEL_LABEL[l]}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="w-24">
-          <label className="text-[11px] font-medium text-slate-500 block mb-1">Years (optional)</label>
-          <input
-            type="number"
-            min={0}
-            max={60}
-            step={0.5}
-            value={years}
-            onChange={(e) => setYears(e.target.value)}
-            className="w-full text-sm border border-slate-200 rounded-lg px-2 py-2"
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={saving || !name.trim()}
-          className="flex items-center gap-1 text-sm font-medium bg-emerald-600 text-white rounded-lg px-3 py-2 hover:bg-emerald-700 disabled:opacity-50"
-        >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add
-        </button>
-      </form>
 
-      {message && <p className={`text-xs mt-2 ${message.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{message.text}</p>}
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        {loading && <span className="text-xs text-slate-400">Loading…</span>}
-        {!loading && skills.length === 0 && (
-          <span className="text-xs text-slate-400">You haven&apos;t added any skills yet.</span>
-        )}
-        {skills.map((s) =>
-          editId === s.id ? (
-            <div key={s.id} className="flex items-center gap-1.5 border border-emerald-300 rounded-full pl-3 pr-1 py-1 text-xs">
-              <span className="font-medium text-slate-800">{s.name}</span>
-              <select
-                value={editLevel}
-                onChange={(e) => setEditLevel(e.target.value as SkillLevel)}
-                className="text-xs border border-slate-200 rounded px-1 py-0.5 bg-white"
+          <div className="hidden sm:grid grid-cols-[1fr_150px_90px_36px] gap-2 text-[11px] font-medium text-slate-500 px-1 mb-1">
+            <span>Skill</span>
+            <span>Level</span>
+            <span>Years (optional)</span>
+            <span />
+          </div>
+          <div className="space-y-2">
+            {rows.map((r) => (
+              <div
+                key={r.key}
+                className={`grid grid-cols-[1fr_80px_36px] sm:grid-cols-[1fr_150px_90px_36px] gap-2 items-center rounded-lg ${
+                  errorKey === r.key ? 'ring-2 ring-rose-300 p-1' : ''
+                }`}
               >
-                {SKILL_LEVELS.map((l) => (
-                  <option key={l} value={l}>
-                    {SKILL_LEVEL_LABEL[l]}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                min={0}
-                max={60}
-                step={0.5}
-                value={editYears}
-                onChange={(e) => setEditYears(e.target.value)}
-                placeholder="yrs"
-                className="w-14 text-xs border border-slate-200 rounded px-1 py-0.5"
-              />
-              <button type="button" onClick={() => saveEdit(s)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-full" title="Save">
-                <Check className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" onClick={() => setEditId(null)} className="p-1 text-slate-400 hover:bg-slate-100 rounded-full" title="Cancel">
-                <X className="h-3.5 w-3.5" />
+                <input
+                  value={r.name}
+                  onChange={(e) => update(r.key, { name: e.target.value })}
+                  list="skill-suggestions"
+                  maxLength={60}
+                  placeholder="e.g. Excel, React, Tally, Sales"
+                  className="col-span-3 sm:col-span-1 w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
+                />
+                <select
+                  value={r.level}
+                  onChange={(e) => update(r.key, { level: e.target.value as SkillLevel })}
+                  className="text-sm border border-slate-200 rounded-lg px-2 py-2 bg-white"
+                >
+                  {SKILL_LEVELS.map((l) => (
+                    <option key={l} value={l}>
+                      {SKILL_LEVEL_LABEL[l]}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min={0}
+                  max={60}
+                  step={0.5}
+                  value={r.years}
+                  onChange={(e) => update(r.key, { years: e.target.value })}
+                  placeholder="yrs"
+                  className="w-full text-sm border border-slate-200 rounded-lg px-2 py-2"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeRow(r.key)}
+                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg justify-self-end"
+                  title="Remove"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
+            <button
+              type="button"
+              onClick={addRow}
+              className="flex items-center gap-1 text-sm text-emerald-700 font-medium hover:bg-emerald-50 rounded-lg px-2 py-1.5"
+            >
+              <Plus className="h-4 w-4" /> Add another skill
+            </button>
+            <div className="flex items-center gap-2">
+              {dirty && (
+                <button
+                  type="button"
+                  onClick={discard}
+                  disabled={submitting}
+                  className="flex items-center gap-1 text-sm border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <RotateCcw className="h-4 w-4" /> Discard
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={submit}
+                disabled={submitting || !dirty}
+                className="flex items-center gap-1 text-sm font-medium bg-emerald-600 text-white rounded-lg px-4 py-2 hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Submit
               </button>
             </div>
-          ) : (
-            <div key={s.id} className={`flex items-center gap-1.5 border rounded-full pl-3 pr-1 py-1 text-xs ${LEVEL_CHIP[s.level]}`}>
-              <span className="font-medium">{s.name}</span>
-              <span className="opacity-75">
-                · {SKILL_LEVEL_LABEL[s.level]}
-                {s.years != null ? ` · ${s.years} yr${s.years === 1 ? '' : 's'}` : ''}
-              </span>
-              <button type="button" onClick={() => startEdit(s)} className="p-1 hover:bg-white/70 rounded-full" title="Edit">
-                <Pencil className="h-3 w-3" />
-              </button>
-              <button type="button" onClick={() => remove(s)} className="p-1 hover:bg-white/70 rounded-full" title="Remove">
-                <X className="h-3 w-3" />
-              </button>
-            </div>
-          ),
-        )}
-      </div>
+          </div>
+
+          {message && <p className={`text-xs mt-2 ${message.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{message.text}</p>}
+        </>
+      )}
     </div>
   );
 }
