@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { can, canCompanyWide } from '@/lib/access-policy';
+import { canSearchSkills } from '@/lib/skills';
 import {
   LayoutDashboard,
   Users,
@@ -80,7 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ...(canCompanyWide(user, 'onboarding:manage') || canCompanyWide(user, 'employees:manage')
       ? [{ label: 'Employee Documents', href: '/employee-documents', icon: FolderOpen }]
       : []),
-    ...(canCompanyWide(user, 'employees:manage') ? [{ label: 'Skills Directory', href: '/skills', icon: Award }] : []),
+    ...(canSearchSkills(user) ? [{ label: 'Skills Directory', href: '/skills', icon: Award }] : []),
     { label: 'Documents & E-Sign', href: '/documents', icon: FileSignature },
     { label: 'Performance & OKRs', href: '/performance', icon: Target },
     { label: 'Expenses', href: '/expenses', icon: Receipt },

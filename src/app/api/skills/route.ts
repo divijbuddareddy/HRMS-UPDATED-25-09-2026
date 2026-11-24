@@ -3,7 +3,7 @@ import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { forbidden } from '@/lib/access';
 import { createAuditLog } from '@/lib/audit';
-import { MAX_SKILLS_PER_EMPLOYEE, canSearchSkills, parseSkillInput } from '@/lib/skills';
+import { MAX_SKILLS_PER_EMPLOYEE, canManageSkills, canSearchSkills, parseSkillInput } from '@/lib/skills';
 
 const skillSelect = { id: true, name: true, level: true, years: true, updatedAt: true } as const;
 
@@ -14,7 +14,7 @@ function resolveEmployeeId(user: { employeeId?: string }, requested: string | nu
 
 /**
  * GET                 -> my skills + company skill names (for autocomplete)
- * GET ?employeeId=... -> that employee's skills (HR / owner)
+ * GET ?employeeId=... -> that employee's skills (HR / owner / manager, read-only)
  */
 export async function GET(req: NextRequest) {
   try {
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => null);
-    const hr = canSearchSkills(user);
+    const hr = canManageSkills(user);
     const employeeId = resolveEmployeeId(user, body?.employeeId, hr);
     if (employeeId === 'FORBIDDEN') return forbidden('You can only add your own skills.');
     if (!employeeId) {

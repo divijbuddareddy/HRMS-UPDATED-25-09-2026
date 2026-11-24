@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { createAuditLog } from '@/lib/audit';
-import { canSearchSkills, parseSkillInput } from '@/lib/skills';
+import { canManageSkills, parseSkillInput } from '@/lib/skills';
 
 async function loadOwnSkill(req: NextRequest, id: string) {
   const user = await getAuthenticatedUser(req);
   if (!user) return { res: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) } as const;
   const skill = await prisma.employeeSkill.findFirst({ where: { id, tenantId: user.tenantId } });
-  const allowed = !!skill && (skill.employeeId === user.employeeId || canSearchSkills(user));
+  const allowed = !!skill && (skill.employeeId === user.employeeId || canManageSkills(user));
   if (!skill || !allowed) return { res: NextResponse.json({ error: 'Skill not found' }, { status: 404 }) } as const;
   return { user, skill } as const;
 }

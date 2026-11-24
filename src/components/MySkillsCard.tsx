@@ -111,7 +111,7 @@ export function MySkillsCard() {
         <div>
           <h3 className="text-sm font-semibold text-slate-800">My Skills</h3>
           <p className="text-xs text-slate-500">
-            Add the skills you have so HR can find you for the right projects. Only you, HR and the company owner can see them.
+            Add the skills you have so HR can find you for the right projects. Only you, HR, managers and the company owner can see them.
           </p>
         </div>
       </div>

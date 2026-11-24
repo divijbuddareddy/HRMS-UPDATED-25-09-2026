@@ -5,7 +5,7 @@ import { forbidden } from '@/lib/access';
 import { canSearchSkills, levelRank, skillKey } from '@/lib/skills';
 
 /**
- * Skills Directory (HR / owner only).
+ * Skills Directory (HR, owner and managers; read-only, whole company).
  * GET ?q=react, node   -> employees having ALL listed skills (partial, case-insensitive match)
  *     &minLevel=ADVANCED -> ...at this level or higher
  *     &departmentId=...  -> ...in this department
@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   try {
     const user = await getAuthenticatedUser(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!canSearchSkills(user)) return forbidden('Only HR or the company owner can search skills.');
+    if (!canSearchSkills(user)) return forbidden('Only HR, managers or the company owner can search skills.');
 
     const sp = req.nextUrl.searchParams;
     const terms = (sp.get('q') || '')

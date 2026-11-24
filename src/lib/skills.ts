@@ -29,9 +29,14 @@ export function skillKey(raw: unknown): string {
   return cleanSkillName(raw).toLowerCase();
 }
 
-/** HR (HR Admin / HR Executive) and the company owner can search everyone's skills. */
-export function canSearchSkills(user: PolicyUser | null | undefined): boolean {
+/** HR (HR Admin / HR Executive) and the company owner can add / change / remove anyone's skills. */
+export function canManageSkills(user: PolicyUser | null | undefined): boolean {
   return isOwner(user) || canCompanyWide(user, 'employees:manage');
+}
+
+/** Who can use the Skills Directory (read-only, whole company): HR, owner and managers. */
+export function canSearchSkills(user: PolicyUser | null | undefined): boolean {
+  return canManageSkills(user) || !!user?.roles?.includes('MANAGER');
 }
 
 /** Validate a skill payload; returns an error message or the cleaned values. */
