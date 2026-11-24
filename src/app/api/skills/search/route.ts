@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
           employeeCode: true,
           workEmail: true,
           department: { select: { id: true, name: true } },
-          designation: { select: { name: true } },
+          designation: { select: { title: true } },
           skills: { select: { id: true, name: true, nameKey: true, level: true, years: true }, orderBy: { name: 'asc' } },
         },
         orderBy: { firstName: 'asc' },
@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
           employeeCode: e.employeeCode,
           workEmail: e.workEmail,
           department: e.department?.name || null,
-          designation: e.designation?.name || null,
+          designation: e.designation?.title || null,
           skills: e.skills.map(({ nameKey, ...s }) => ({ ...s, matched: matchedIds.has(s.id) })),
           score: best.length ? levelRank(best[0].level) * 100 + (best[0].years || 0) : 0,
         };
