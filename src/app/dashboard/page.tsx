@@ -23,6 +23,7 @@ import {
 import { format } from 'date-fns';
 import { getPunchLocation, LocationError } from '@/lib/geo';
 import { PunchLocation, LocationRequirementNote } from '@/components/attendance/PunchLocation';
+import { MySkillsCard } from '@/components/MySkillsCard';
 
 const TEAM_TODAY: Record<string, { label: string; cls: string }> = {
   WORKING: { label: 'Working', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -432,6 +433,9 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* My skills (employees) */}
+        {user?.employee?.id && <MySkillsCard />}
 
         {/* Manager / Admin Section: Team Approvals & Headcount */}
         {/* My Team: only employees assigned to me as Reporting Manager */}

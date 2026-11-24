@@ -29,6 +29,7 @@ import {
   FolderOpen,
   Network,
   MapPin,
+  Award,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -79,6 +80,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ...(canCompanyWide(user, 'onboarding:manage') || canCompanyWide(user, 'employees:manage')
       ? [{ label: 'Employee Documents', href: '/employee-documents', icon: FolderOpen }]
       : []),
+    ...(canCompanyWide(user, 'employees:manage') ? [{ label: 'Skills Directory', href: '/skills', icon: Award }] : []),
     { label: 'Documents & E-Sign', href: '/documents', icon: FileSignature },
     { label: 'Performance & OKRs', href: '/performance', icon: Target },
     { label: 'Expenses', href: '/expenses', icon: Receipt },
